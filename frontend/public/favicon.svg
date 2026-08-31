@@ -1,3 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <text x="16" y="24" font-size="26" text-anchor="middle">🧭</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <polygon points="92,8 6,64 52,54" fill="#146E72" />
+  <polygon points="92,8 52,54 62,58" fill="#F2652E" />
+  <polygon points="92,8 62,58 82,84" fill="#1D8A8C" />
 </svg>

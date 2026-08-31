@@ -41,7 +41,7 @@ export function ItineraryScreen() {
 
       <div className={`banner ${overBudget ? 'warn' : 'good'}`} style={{ justifyContent: 'space-between' }}>
         <span>${total} of ${cap} budget</span>
-        {overBudget && <span className="mono-label" style={{ color: 'var(--accent)' }}>over budget</span>}
+        {overBudget && <span className="mono-label" style={{ color: 'var(--danger)' }}>over budget</span>}
       </div>
 
       {overBudget && (

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CompassIcon, PinIcon } from '../components/icons';
+import { LogoMark, PinIcon } from '../components/icons';
 import { useTripStore } from '../state/tripStore';
 import { DESTINATIONS } from '../art/DestinationArt';
 
@@ -25,7 +25,7 @@ export function HomeScreen() {
   return (
     <div className="screen-enter" style={{ minHeight: '55vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 28 }}>
       <div className="mark">
-        <CompassIcon />
+        <LogoMark />
         <span>Trip<b>Buggy</b></span>
       </div>
       <form

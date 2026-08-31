@@ -15,3 +15,14 @@ export function PinIcon(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
+
+/** The TripBuggy mark: a faceted paper airplane, teal with a coral fold-sliver. */
+export function LogoMark(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 100 100" {...props}>
+      <polygon points="92,8 6,64 52,54" fill="#146E72" />
+      <polygon points="92,8 52,54 62,58" fill="#F2652E" />
+      <polygon points="92,8 62,58 82,84" fill="#1D8A8C" />
+    </svg>
+  );
+}
