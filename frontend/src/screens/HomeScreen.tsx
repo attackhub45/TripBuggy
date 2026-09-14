@@ -6,20 +6,29 @@ import { DESTINATIONS } from '../art/DestinationArt';
 
 export function HomeScreen() {
   const [value, setValue] = useState('');
+  const [starting, setStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const startTrip = useTripStore((s) => s.startTrip);
   const navigate = useNavigate();
 
-  function go(raw: string) {
-    if (!raw.trim()) return;
-    startTrip(raw.trim());
-    navigate('/flow');
+  async function go(raw: string) {
+    if (!raw.trim() || starting) return;
+    setStarting(true);
+    setError(null);
+    try {
+      await startTrip(raw.trim());
+      navigate('/flow');
+    } catch (err) {
+      setError('Could not reach the backend — is it running?');
+      setStarting(false);
+    }
   }
 
   function surpriseMe() {
     const keys = Object.keys(DESTINATIONS) as (keyof typeof DESTINATIONS)[];
     const pick = keys[Math.floor(Math.random() * keys.length)];
     setValue(DESTINATIONS[pick].name);
-    go(DESTINATIONS[pick].name);
+    void go(DESTINATIONS[pick].name);
   }
 
   return (
@@ -30,7 +39,7 @@ export function HomeScreen() {
       </div>
       <form
         style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18 }}
-        onSubmit={(e) => { e.preventDefault(); go(value); }}
+        onSubmit={(e) => { e.preventDefault(); void go(value); }}
       >
         <div className="pill-input">
           <PinIcon />
@@ -43,13 +52,17 @@ export function HomeScreen() {
           />
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 18 }}>
-          <button type="submit" className="btn-primary">Plan my trip</button>
-          <button type="button" className="btn-text" onClick={surpriseMe}>Surprise me</button>
+          <button type="submit" className="btn-primary" disabled={starting}>{starting ? 'Starting…' : 'Plan my trip'}</button>
+          <button type="button" className="btn-text" onClick={surpriseMe} disabled={starting}>Surprise me</button>
         </div>
       </form>
-      <p className="mono-label" style={{ textAlign: 'center', maxWidth: '38ch', textTransform: 'none', letterSpacing: 0 }}>
-        Tell us where — we'll ask a couple quick questions and build the plan from there.
-      </p>
+      {error ? (
+        <p className="mono-label" style={{ textAlign: 'center', color: 'var(--danger)', textTransform: 'none', letterSpacing: 0 }}>{error}</p>
+      ) : (
+        <p className="mono-label" style={{ textAlign: 'center', maxWidth: '38ch', textTransform: 'none', letterSpacing: 0 }}>
+          Tell us where — we'll ask a couple quick questions and build the plan from there.
+        </p>
+      )}
     </div>
   );
 }

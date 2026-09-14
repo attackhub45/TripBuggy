@@ -1,15 +1,17 @@
 import { create } from 'zustand';
-import { matchDestination, DESTINATIONS, type DestinationKey } from '../art/DestinationArt';
+import { matchDestination, type DestinationKey } from '../art/DestinationArt';
+import { api, ensureAuthenticated, type ApiTrip } from '../api/client';
 import type {
   IntakeAnswers, RouteStop, ItineraryItem, CrewMember, ChangeRequest,
-  AutonomyLevel, ItemType, Slot,
+  AutonomyLevel, ItemType, ItemStatus, Slot,
 } from './types';
 
 // ---------------------------------------------------------------------------
-// This store simulates everything the TRD assigns to the backend agent
-// (route drafting, catalog search, booking, change handling). Each action
-// below is the exact seam the TRD marks for a real API/agent call later —
-// see docs/TRD.md §5. Nothing here talks to a network.
+// This store used to simulate everything client-side (see git history before
+// this file). It now calls the real backend — see frontend/src/api/client.ts
+// and backend/app/routers/trips.py. The agent logic behind those endpoints
+// is still simulated (backend/app/agent_service.py); wiring the real Claude
+// API is the next step, per docs/TRD.md §5.
 // ---------------------------------------------------------------------------
 
 const BUDGET_CAPS: Record<string, number> = {
@@ -18,30 +20,15 @@ const BUDGET_CAPS: Record<string, number> = {
   'Treat yourself': 6000,
 };
 
-const ACTIVITY_POOL: Record<DestinationKey, string[]> = {
-  paris: ['Louvre skip-the-line tour', 'Seine river cruise at dusk', 'Pastry-making class in Le Marais'],
-  tokyo: ['Tsukiji Outer Market food crawl', 'teamLab digital art museum', 'Evening in Shibuya'],
-  newyork: ['Top of the Rock at sunset', 'Broadway show', 'High Line walk + Chelsea Market'],
-  rome: ['Colosseum underground tour', 'Trastevere food crawl', 'Vatican Museums early entry'],
-  santorini: ['Caldera sunset sail', 'Oia village wander', 'Volcanic wine tasting'],
-  bali: ['Ubud rice terrace trek', 'Sunrise at Mount Batur', 'Uluwatu temple + kecak dance'],
-  iceland: ['Golden Circle day trip', 'Blue Lagoon soak', 'Northern lights hunt'],
-  dubai: ['Desert safari + BBQ dinner', 'Burj Khalifa observation deck', 'Old Dubai souk crawl'],
-  fallback: ['Scenic overlook drive', 'Local food market crawl', 'Sunset lookout point'],
-};
-
-function destName(destKey: DestinationKey, raw: string): string {
-  if (destKey === 'fallback') return raw || 'your destination';
-  return DESTINATIONS[destKey].name;
-}
-
 function uid(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-const SLOTS: Slot[] = ['morning', 'afternoon', 'evening'];
+const QUESTION_ORDER: (keyof IntakeAnswers)[] = ['when', 'who', 'budget', 'pace'];
 
 interface TripState {
+  tripId: string | null;
+
   // intake
   destinationRaw: string;
   destKey: DestinationKey;
@@ -68,38 +55,40 @@ interface TripState {
   changeLog: ChangeRequest[];
 
   // actions
-  startTrip: (raw: string) => void;
-  answerQuestion: (key: keyof IntakeAnswers, value: string) => void;
-  addCrew: (email: string, role: CrewMember['role']) => void;
-  setInternational: (v: boolean) => void;
+  startTrip: (raw: string) => Promise<void>;
+  answerQuestion: (key: keyof IntakeAnswers, value: string) => Promise<void>;
+  addCrew: (email: string, role: CrewMember['role']) => Promise<void>;
+  setInternational: (v: boolean) => Promise<void>;
 
   draftRoute: () => Promise<void>;
-  addRouteStop: (name: string) => void;
-  removeRouteStop: (id: string) => void;
-  moveRouteStop: (id: string, dir: -1 | 1) => void;
+  addRouteStop: (name: string) => Promise<void>;
+  removeRouteStop: (id: string) => Promise<void>;
+  moveRouteStop: (id: string, dir: -1 | 1) => Promise<void>;
 
   discoverOptions: () => Promise<void>;
-  addSuggestionToItinerary: (suggestionId: string) => void;
-  addManualItem: (title: string, type: ItemType, cost: number) => void;
-  removeItem: (id: string) => void;
-  setItemSlot: (id: string, day: number, slot: Slot) => void;
+  addSuggestionToItinerary: (suggestionId: string) => Promise<void>;
+  addManualItem: (title: string, type: ItemType, cost: number) => Promise<void>;
+  removeItem: (id: string) => Promise<void>;
+  setItemSlot: (id: string, day: number, slot: Slot) => Promise<void>;
 
   budgetCap: () => number;
   budgetTotal: () => number;
   isOverBudget: () => boolean;
   hasConflicts: () => boolean;
 
-  setAutonomy: (level: AutonomyLevel) => void;
+  setAutonomy: (level: AutonomyLevel) => Promise<void>;
   runBooking: () => Promise<void>;
-  approveItem: (id: string) => void;
+  approveItem: (id: string) => Promise<void>;
 
-  submitChangeRequest: (text: string) => void;
+  submitChangeRequest: (text: string) => Promise<void>;
   resolveActiveChange: () => void;
 
   reset: () => void;
 }
 
 const initialState = {
+  tripId: null as string | null,
+
   destinationRaw: '',
   destKey: 'fallback' as DestinationKey,
   answers: {} as IntakeAnswers,
@@ -121,103 +110,172 @@ const initialState = {
   changeLog: [] as ChangeRequest[],
 };
 
+/** Converts the backend's TripOut shape into this store's shape, in one place. */
+function mapTrip(trip: ApiTrip) {
+  const answers: IntakeAnswers = {};
+  if (trip.when_answer) answers.when = trip.when_answer;
+  if (trip.who_answer) answers.who = trip.who_answer;
+  if (trip.budget_answer) answers.budget = trip.budget_answer;
+  if (trip.pace_answer) answers.pace = trip.pace_answer;
+  const answeredOrder = QUESTION_ORDER.filter((k) => answers[k] !== undefined);
+
+  const changeLog: ChangeRequest[] = trip.change_requests.map((c) => ({
+    id: c.id,
+    text: c.prompt_text,
+    affectedItemId: c.affected_item_id,
+    createdAt: new Date(c.created_at).getTime(),
+  }));
+  const activeRaw = trip.change_requests.find((c) => !c.resolved) ?? null;
+
+  return {
+    tripId: trip.id,
+    destinationRaw: trip.destination_raw,
+    destKey: trip.destination_key as DestinationKey,
+    answers,
+    answeredOrder,
+    crew: trip.crew.map((c) => ({ id: c.id, email: c.email, role: c.role as CrewMember['role'] })),
+    isInternational: trip.is_international,
+    routeStops: trip.route_stops.map((s) => ({ id: s.id, name: s.name, notes: s.notes ?? '' })),
+    items: trip.items.map((i) => ({
+      id: i.id,
+      type: i.item_type as ItemType,
+      title: i.title,
+      cost: i.cost_estimate,
+      day: i.day_index,
+      slot: i.slot as Slot,
+      status: i.status as ItemStatus,
+      source: i.source as 'agent' | 'manual',
+      autonomyAtBooking: (i.autonomy_at_booking ?? undefined) as AutonomyLevel | undefined,
+    })),
+    autonomyLevel: trip.autonomy_level as AutonomyLevel,
+    activeChangeRequest: activeRaw
+      ? {
+          id: activeRaw.id,
+          text: activeRaw.prompt_text,
+          affectedItemId: activeRaw.affected_item_id,
+          createdAt: new Date(activeRaw.created_at).getTime(),
+        }
+      : null,
+    changeLog,
+  };
+}
+
 export const useTripStore = create<TripState>((set, get) => ({
   ...initialState,
 
-  startTrip: (raw) => {
-    set({
-      ...initialState,
-      destinationRaw: raw,
-      destKey: matchDestination(raw),
-    });
+  startTrip: async (raw) => {
+    set({ ...initialState, destinationRaw: raw });
+    await ensureAuthenticated();
+    const trip = await api.createTrip(raw);
+    set(mapTrip(trip));
   },
 
-  answerQuestion: (key, value) => {
-    set((s) => ({
-      answers: { ...s.answers, [key]: value },
-      answeredOrder: s.answeredOrder.includes(key) ? s.answeredOrder : [...s.answeredOrder, key],
-    }));
+  answerQuestion: async (key, value) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.submitIntakeAnswer(tripId, key, value);
+    set(mapTrip(trip));
   },
 
-  addCrew: (email, role) => {
-    if (!email.trim()) return;
-    set((s) => ({ crew: [...s.crew, { id: uid('crew'), email: email.trim(), role }] }));
+  addCrew: async (email, role) => {
+    const { tripId } = get();
+    if (!tripId || !email.trim()) return;
+    const trip = await api.addCrew(tripId, email.trim(), role);
+    set(mapTrip(trip));
   },
 
-  setInternational: (v) => set({ isInternational: v }),
+  setInternational: async (v) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.setInternational(tripId, v);
+    set(mapTrip(trip));
+  },
 
   draftRoute: async () => {
+    const { tripId } = get();
+    if (!tripId) return;
     set({ routeLoading: true });
-    await new Promise((r) => setTimeout(r, 900));
-    const { destKey, destinationRaw } = get();
-    const name = destName(destKey, destinationRaw);
-    const stops: RouteStop[] = [
-      { id: uid('stop'), name: `Arrive in ${name}`, notes: 'Settle in, get oriented' },
-      { id: uid('stop'), name: `Explore ${name}'s center`, notes: 'Walkable highlights, no fixed plan' },
-      { id: uid('stop'), name: `Day trip beyond ${name}`, notes: 'Something outside the city center' },
-      { id: uid('stop'), name: `Depart from ${name}`, notes: 'Buffer time before departure' },
-    ];
-    set({ routeStops: stops, routeLoading: false });
+    try {
+      const trip = await api.draftRoute(tripId);
+      set({ ...mapTrip(trip), routeLoading: false });
+    } catch (err) {
+      set({ routeLoading: false });
+      throw err;
+    }
   },
 
-  addRouteStop: (name) => {
-    if (!name.trim()) return;
-    set((s) => ({ routeStops: [...s.routeStops, { id: uid('stop'), name: name.trim(), notes: 'Added manually' }] }));
+  addRouteStop: async (name) => {
+    const { tripId } = get();
+    if (!tripId || !name.trim()) return;
+    const trip = await api.addRouteStop(tripId, name.trim());
+    set(mapTrip(trip));
   },
-  removeRouteStop: (id) => set((s) => ({ routeStops: s.routeStops.filter((r) => r.id !== id) })),
-  moveRouteStop: (id, dir) => {
-    set((s) => {
-      const stops = [...s.routeStops];
-      const i = stops.findIndex((r) => r.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= stops.length) return s;
-      [stops[i], stops[j]] = [stops[j], stops[i]];
-      return { routeStops: stops };
-    });
+
+  removeRouteStop: async (id) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.removeRouteStop(tripId, id);
+    set(mapTrip(trip));
+  },
+
+  moveRouteStop: async (id, dir) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.moveRouteStop(tripId, id, dir);
+    set(mapTrip(trip));
   },
 
   discoverOptions: async () => {
+    const { tripId } = get();
+    if (!tripId) return;
     set({ discoverLoading: true });
-    await new Promise((r) => setTimeout(r, 900));
-    const { destKey, destinationRaw } = get();
-    const name = destName(destKey, destinationRaw);
-    const activities = ACTIVITY_POOL[destKey];
-    const suggestions: ItineraryItem[] = [
-      { id: uid('sug'), type: 'flight', title: `Flight to ${name}`, cost: 420, day: 1, slot: 'morning', status: 'proposed', source: 'agent' },
-      { id: uid('sug'), type: 'stay', title: `Boutique stay near the center of ${name}`, cost: 640, day: 1, slot: 'afternoon', status: 'proposed', source: 'agent' },
-      { id: uid('sug'), type: 'activity', title: activities[0], cost: 85, day: 2, slot: 'morning', status: 'proposed', source: 'agent' },
-      { id: uid('sug'), type: 'activity', title: activities[1], cost: 60, day: 2, slot: 'afternoon', status: 'proposed', source: 'agent' },
-      { id: uid('sug'), type: 'activity', title: activities[2], cost: 110, day: 3, slot: 'morning', status: 'proposed', source: 'agent' },
-      { id: uid('sug'), type: 'flight', title: `Flight home from ${name}`, cost: 390, day: 3, slot: 'evening', status: 'proposed', source: 'agent' },
-    ];
-    set({ suggestions, discoverLoading: false });
+    try {
+      const raw = await api.discoverOptions(tripId);
+      const suggestions: ItineraryItem[] = raw.map((s) => ({
+        id: uid('sug'),
+        type: s.item_type as ItemType,
+        title: s.title,
+        cost: s.cost_estimate,
+        day: 1,
+        slot: 'morning',
+        status: 'proposed',
+        source: 'agent',
+      }));
+      set({ suggestions, discoverLoading: false });
+    } catch (err) {
+      set({ discoverLoading: false });
+      throw err;
+    }
   },
 
-  addSuggestionToItinerary: (suggestionId) => {
-    const s = get().suggestions.find((x) => x.id === suggestionId);
+  addSuggestionToItinerary: async (suggestionId) => {
+    const { tripId, suggestions } = get();
+    if (!tripId) return;
+    const s = suggestions.find((x) => x.id === suggestionId);
     if (!s) return;
-    const count = get().items.length;
-    const day = Math.floor(count / 3) + 1;
-    const slot = SLOTS[count % 3];
-    set((state) => ({
-      items: [...state.items, { ...s, id: uid('item'), day, slot }],
-    }));
+    const trip = await api.addItineraryItem(tripId, s.type, s.title, s.cost, 'agent');
+    set(mapTrip(trip));
   },
 
-  addManualItem: (title, type, cost) => {
-    if (!title.trim()) return;
-    const count = get().items.length;
-    const day = Math.floor(count / 3) + 1;
-    const slot = SLOTS[count % 3];
-    set((s) => ({
-      items: [...s.items, { id: uid('item'), type, title: title.trim(), cost, day, slot, status: 'proposed', source: 'manual' }],
-    }));
+  addManualItem: async (title, type, cost) => {
+    const { tripId } = get();
+    if (!tripId || !title.trim()) return;
+    const trip = await api.addItineraryItem(tripId, type, title.trim(), cost, 'manual');
+    set(mapTrip(trip));
   },
 
-  removeItem: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
+  removeItem: async (id) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.removeItineraryItem(tripId, id);
+    set(mapTrip(trip));
+  },
 
-  setItemSlot: (id, day, slot) => {
-    set((s) => ({ items: s.items.map((i) => (i.id === id ? { ...i, day, slot } : i)) }));
+  setItemSlot: async (id, day, slot) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.updateItineraryItem(tripId, id, { day_index: day, slot });
+    set(mapTrip(trip));
   },
 
   budgetCap: () => BUDGET_CAPS[get().answers.budget ?? ''] ?? 2800,
@@ -234,45 +292,38 @@ export const useTripStore = create<TripState>((set, get) => ({
     return false;
   },
 
-  setAutonomy: (level) => set({ autonomyLevel: level }),
+  setAutonomy: async (level) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.setAutonomy(tripId, level);
+    set(mapTrip(trip));
+  },
 
   runBooking: async () => {
-    const level = get().autonomyLevel;
-    if (level === 'draft_only') return; // nothing to run — items stay proposed for the customer to book themselves
+    const { tripId, autonomyLevel } = get();
+    if (!tripId || autonomyLevel === 'draft_only') return;
     set({ bookingRunning: true });
-    await new Promise((r) => setTimeout(r, 900));
-    if (level === 'full_auto') {
-      set((s) => ({
-        items: s.items.map((i) => (i.status !== 'simulated_booked' ? { ...i, status: 'simulated_booked', autonomyAtBooking: 'full_auto' } : i)),
-        bookingRunning: false,
-      }));
-    } else {
-      set((s) => ({
-        items: s.items.map((i) => (i.status === 'proposed' ? { ...i, status: 'pending_approval' } : i)),
-        bookingRunning: false,
-      }));
+    try {
+      const trip = await api.runBooking(tripId);
+      set({ ...mapTrip(trip), bookingRunning: false });
+    } catch (err) {
+      set({ bookingRunning: false });
+      throw err;
     }
-    if (get().activeChangeRequest) get().resolveActiveChange();
   },
 
-  approveItem: (id) => {
-    set((s) => ({
-      items: s.items.map((i) => (i.id === id ? { ...i, status: 'simulated_booked', autonomyAtBooking: 'approve_each' } : i)),
-    }));
-    const stillPending = get().items.some((i) => i.status === 'pending_approval');
-    if (!stillPending && get().activeChangeRequest) get().resolveActiveChange();
+  approveItem: async (id) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.approveItem(tripId, id);
+    set(mapTrip(trip));
   },
 
-  submitChangeRequest: (text) => {
-    if (!text.trim()) return;
-    const booked = get().items.filter((i) => i.status === 'simulated_booked');
-    const target = booked[Math.floor(Math.random() * booked.length)] ?? null;
-    const req: ChangeRequest = { id: uid('chg'), text: text.trim(), affectedItemId: target?.id ?? null, createdAt: Date.now() };
-    set((s) => ({
-      activeChangeRequest: req,
-      changeLog: [...s.changeLog, req],
-      items: target ? s.items.map((i) => (i.id === target.id ? { ...i, status: 'pending_approval' } : i)) : s.items,
-    }));
+  submitChangeRequest: async (text) => {
+    const { tripId } = get();
+    if (!tripId || !text.trim()) return;
+    const trip = await api.submitChangeRequest(tripId, text.trim());
+    set(mapTrip(trip));
   },
 
   resolveActiveChange: () => set({ activeChangeRequest: null }),

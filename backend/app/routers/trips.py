@@ -12,6 +12,15 @@ QUESTION_KEYS = {"when", "who", "budget", "pace"}
 AUTONOMY_LEVELS = {"draft_only", "approve_each", "full_auto"}
 
 
+def _resolve_change_requests_if_clear(trip: models.Trip) -> None:
+    """If nothing is left pending approval, the most recent on-the-road change (if any) is resolved."""
+    if any(i.status == "pending_approval" for i in trip.items):
+        return
+    for cr in trip.change_requests:
+        if not cr.resolved:
+            cr.resolved = True
+
+
 @router.post("", response_model=schemas.TripOut, status_code=status.HTTP_201_CREATED)
 def create_trip(
     payload: schemas.TripCreateRequest,
@@ -44,6 +53,19 @@ def submit_intake_answer(
     if payload.question_key not in QUESTION_KEYS:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown question key '{payload.question_key}'")
     setattr(trip, f"{payload.question_key}_answer", payload.answer_value)
+    db.commit()
+    db.refresh(trip)
+    return trip
+
+
+@router.patch("/{trip_id}/international", response_model=schemas.TripOut)
+def set_international(
+    trip_id: UUID,
+    payload: schemas.InternationalUpdateRequest,
+    trip: models.Trip = Depends(get_owned_trip),
+    db: Session = Depends(get_db),
+):
+    trip.is_international = payload.is_international
     db.commit()
     db.refresh(trip)
     return trip
@@ -86,6 +108,24 @@ def add_route_stop(
     db.add(models.RouteStop(trip_id=trip.id, order_index=len(trip.route_stops), name=payload.name, notes=payload.notes))
     db.commit()
     db.refresh(trip)
+    return trip
+
+
+@router.post("/{trip_id}/route/stops/{stop_id}/move", response_model=schemas.TripOut)
+def move_route_stop(
+    trip_id: UUID,
+    stop_id: UUID,
+    payload: schemas.RouteStopMoveRequest,
+    trip: models.Trip = Depends(get_owned_trip),
+    db: Session = Depends(get_db),
+):
+    stops = sorted(trip.route_stops, key=lambda s: s.order_index)
+    i = next((idx for idx, s in enumerate(stops) if s.id == stop_id), None)
+    j = None if i is None else i + payload.direction
+    if i is not None and j is not None and 0 <= j < len(stops):
+        stops[i].order_index, stops[j].order_index = stops[j].order_index, stops[i].order_index
+        db.commit()
+        db.refresh(trip)
     return trip
 
 
@@ -207,6 +247,7 @@ def run_booking(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: 
             if item.status == "proposed":
                 item.status = "pending_approval"
     # draft_only: nothing to run — items stay proposed for the customer to book themselves
+    _resolve_change_requests_if_clear(trip)
     db.commit()
     db.refresh(trip)
     return trip
@@ -224,6 +265,7 @@ def approve_item(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Itinerary item not found")
     item.status = "simulated_booked"
     item.autonomy_at_booking = "approve_each"
+    _resolve_change_requests_if_clear(trip)
     db.commit()
     db.refresh(trip)
     return trip

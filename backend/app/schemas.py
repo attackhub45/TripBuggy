@@ -47,6 +47,10 @@ class RouteStopCreateRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class RouteStopMoveRequest(BaseModel):
+    direction: int  # -1 or 1
+
+
 class RouteStopOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -89,6 +93,10 @@ class BudgetOut(BaseModel):
 
 class AutonomyUpdateRequest(BaseModel):
     autonomy_level: str
+
+
+class InternationalUpdateRequest(BaseModel):
+    is_international: bool
 
 
 class ChangeRequestCreateRequest(BaseModel):
