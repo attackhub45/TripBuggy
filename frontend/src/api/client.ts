@@ -41,7 +41,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 export async function ensureAuthenticated(): Promise<void> {
   if (getToken()) return;
   const deviceId = crypto.randomUUID();
-  const email = `device-${deviceId}@tripbuggy.local`;
+  const email = `device-${deviceId}@tripbuggy-device.com`;
   const password = deviceId;
   try {
     const { access_token } = await request<{ access_token: string }>('/api/v1/auth/signup', {

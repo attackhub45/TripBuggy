@@ -9,8 +9,8 @@ const TYPE_LABEL = { flight: 'Flight', stay: 'Stay', activity: 'Activity' };
 export function OnTheRoadScreen() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
-  const { items, submitChangeRequest, changeLog } = useTripStore(useShallow((s) => ({
-    items: s.items, submitChangeRequest: s.submitChangeRequest, changeLog: s.changeLog,
+  const { items, submitChangeRequest, changeLog, completeTrip } = useTripStore(useShallow((s) => ({
+    items: s.items, submitChangeRequest: s.submitChangeRequest, changeLog: s.changeLog, completeTrip: s.completeTrip,
   })));
 
   const days = Array.from(new Set(items.map((i) => i.day))).sort((a, b) => a - b);
@@ -63,7 +63,7 @@ export function OnTheRoadScreen() {
         )}
       </div>
 
-      <button className="btn-primary" style={{ alignSelf: 'center' }} onClick={() => navigate('/recap')}>
+      <button className="btn-primary" style={{ alignSelf: 'center' }} onClick={() => { void completeTrip().then(() => navigate('/recap')); }}>
         End trip
       </button>
     </div>

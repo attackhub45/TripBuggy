@@ -82,6 +82,7 @@ interface TripState {
 
   submitChangeRequest: (text: string) => Promise<void>;
   resolveActiveChange: () => void;
+  completeTrip: () => Promise<void>;
 
   reset: () => void;
 }
@@ -327,6 +328,13 @@ export const useTripStore = create<TripState>((set, get) => ({
   },
 
   resolveActiveChange: () => set({ activeChangeRequest: null }),
+
+  completeTrip: async () => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await api.completeTrip(tripId);
+    set(mapTrip(trip));
+  },
 
   reset: () => set({ ...initialState }),
 }));
