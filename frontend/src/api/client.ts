@@ -14,6 +14,13 @@ function setToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token);
 }
 
+function clearToken() {
+  cachedToken = null;
+  localStorage.removeItem(TOKEN_KEY);
+}
+
+export class AuthError extends Error {}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -24,6 +31,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       ...options.headers,
     },
   });
+  if (res.status === 401) {
+    // The stored token is stale (e.g. its user no longer exists) — drop it so the next
+    // ensureAuthenticated() call re-provisions instead of retrying with the same bad token.
+    clearToken();
+    throw new AuthError(`${res.status} ${path}`);
+  }
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`${res.status} ${path}: ${body}`);

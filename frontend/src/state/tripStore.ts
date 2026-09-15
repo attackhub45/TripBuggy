@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { matchDestination, type DestinationKey } from '../art/DestinationArt';
-import { api, ensureAuthenticated, type ApiTrip } from '../api/client';
+import { api, ensureAuthenticated, AuthError, type ApiTrip } from '../api/client';
 import type {
   IntakeAnswers, RouteStop, ItineraryItem, CrewMember, ChangeRequest,
   AutonomyLevel, ItemType, ItemStatus, Slot,
@@ -174,7 +174,16 @@ export const useTripStore = create<TripState>((set, get) => ({
   startTrip: async (raw) => {
     set({ ...initialState, destinationRaw: raw });
     await ensureAuthenticated();
-    const trip = await api.createTrip(raw);
+    let trip: ApiTrip;
+    try {
+      trip = await api.createTrip(raw);
+    } catch (err) {
+      // A stale token from a previous session (e.g. its account no longer exists) was
+      // already cleared by the 401 handler in api/client.ts — re-provision once and retry.
+      if (!(err instanceof AuthError)) throw err;
+      await ensureAuthenticated();
+      trip = await api.createTrip(raw);
+    }
     set(mapTrip(trip));
   },
 
