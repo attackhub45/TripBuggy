@@ -10,11 +10,13 @@ const TYPE_LABEL = { flight: 'Flight', stay: 'Stay', activity: 'Activity' };
 export function ItineraryScreen() {
   const navigate = useNavigate();
   const {
-    items, removeItem, setItemSlot, budgetCap, budgetTotal, isOverBudget, hasConflicts,
+    items, removeItem, setItemSlot, budgetCap, budgetTotal, isOverBudget, hasConflicts, tripDays,
   } = useTripStore(useShallow((s) => ({
     items: s.items, removeItem: s.removeItem, setItemSlot: s.setItemSlot,
     budgetCap: s.budgetCap, budgetTotal: s.budgetTotal, isOverBudget: s.isOverBudget, hasConflicts: s.hasConflicts,
+    tripDays: s.days,
   })));
+  const dayOptions = Array.from({ length: tripDays ?? 1 }, (_, i) => i + 1);
 
   const total = budgetTotal();
   const cap = budgetCap();
@@ -72,7 +74,7 @@ export function ItineraryScreen() {
                   onChange={(e) => setItemSlot(item.id, Number(e.target.value), item.slot)}
                   style={{ borderRadius: 999, border: '1px solid var(--border)', padding: '6px 10px', background: 'var(--surface)', color: 'var(--text)' }}
                 >
-                  {[1, 2, 3, 4, 5].map((d) => <option key={d} value={d}>Day {d}</option>)}
+                  {dayOptions.map((d) => <option key={d} value={d}>Day {d}</option>)}
                 </select>
                 <select
                   value={item.slot}

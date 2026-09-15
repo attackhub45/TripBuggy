@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { TopBar } from '../components/TopBar';
@@ -14,8 +14,15 @@ export function RouteScreen() {
     addRouteStop: s.addRouteStop, removeRouteStop: s.removeRouteStop, moveRouteStop: s.moveRouteStop,
   })));
 
+  const draftedRef = useRef(false);
   useEffect(() => {
-    if (routeStops.length === 0 && !routeLoading) draftRoute();
+    // Guards against React 18 StrictMode's double effect-invocation in dev, which would
+    // otherwise fire two concurrent draftRoute() calls and leave duplicate stops behind.
+    if (draftedRef.current) return;
+    if (routeStops.length === 0 && !routeLoading) {
+      draftedRef.current = true;
+      draftRoute();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

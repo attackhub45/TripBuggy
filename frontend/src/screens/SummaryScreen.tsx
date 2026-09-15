@@ -9,14 +9,36 @@ import { QUESTIONS } from '../state/questions';
 export function SummaryScreen() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
+  const [daysError, setDaysError] = useState(false);
+  const [continuing, setContinuing] = useState(false);
   const {
     destinationRaw, destKey, answers, crew, addCrew, isInternational, setInternational,
+    days, specialRequests, setTripDetails,
   } = useTripStore(useShallow((s) => ({
     destinationRaw: s.destinationRaw, destKey: s.destKey, answers: s.answers,
     crew: s.crew, addCrew: s.addCrew, isInternational: s.isInternational, setInternational: s.setInternational,
+    days: s.days, specialRequests: s.specialRequests, setTripDetails: s.setTripDetails,
   })));
+  const [daysInput, setDaysInput] = useState(days ? String(days) : '');
+  const [requestsInput, setRequestsInput] = useState(specialRequests);
 
   const wantsCrew = answers.who && answers.who !== 'Just me';
+
+  async function continueToRoute() {
+    const parsedDays = parseInt(daysInput, 10);
+    if (!Number.isFinite(parsedDays) || parsedDays < 1) {
+      setDaysError(true);
+      return;
+    }
+    setDaysError(false);
+    setContinuing(true);
+    try {
+      await setTripDetails(parsedDays, requestsInput.trim());
+      navigate('/route');
+    } finally {
+      setContinuing(false);
+    }
+  }
 
   return (
     <div className="screen-enter" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -52,13 +74,40 @@ export function SummaryScreen() {
         </div>
       )}
 
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <p className="mono-label" style={{ marginBottom: 6 }}>How many days?</p>
+          <div className="pill-input" style={{ padding: '9px 16px', maxWidth: 140, borderColor: daysError ? 'var(--danger)' : undefined }}>
+            <input
+              value={daysInput}
+              onChange={(e) => { setDaysInput(e.target.value); setDaysError(false); }}
+              placeholder="e.g. 5"
+              inputMode="numeric"
+              type="number"
+              min={1}
+            />
+          </div>
+          {daysError && <p className="mono-label" style={{ color: 'var(--danger)', marginTop: 6 }}>Enter at least 1 day before we plan the route</p>}
+        </div>
+        <div>
+          <p className="mono-label" style={{ marginBottom: 6 }}>Special requests <span style={{ textTransform: 'none', letterSpacing: 0 }}>— optional</span></p>
+          <textarea
+            value={requestsInput}
+            onChange={(e) => setRequestsInput(e.target.value)}
+            placeholder="e.g. traveling with a toddler, vegetarian meals, avoid long hikes"
+            rows={3}
+            style={{ width: '100%', resize: 'vertical', border: '1px solid var(--border)', borderRadius: 12, padding: 12, background: 'var(--surface)', color: 'var(--text)', font: 'inherit', fontSize: 14 }}
+          />
+        </div>
+      </div>
+
       <label className="card" style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
         <input type="checkbox" checked={isInternational} onChange={(e) => setInternational(e.target.checked)} />
         <span style={{ fontSize: 14 }}>This is an international trip <span style={{ color: 'var(--text-muted)' }}>— we'll remind you about documents before booking</span></span>
       </label>
 
-      <button className="btn-primary" style={{ alignSelf: 'center' }} onClick={() => navigate('/route')}>
-        See my route
+      <button className="btn-primary" style={{ alignSelf: 'center' }} onClick={() => void continueToRoute()} disabled={continuing}>
+        {continuing ? 'Saving…' : 'See my route'}
       </button>
     </div>
   );

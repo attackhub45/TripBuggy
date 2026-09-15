@@ -71,6 +71,22 @@ def set_international(
     return trip
 
 
+@router.patch("/{trip_id}/details", response_model=schemas.TripOut)
+def set_trip_details(
+    trip_id: UUID,
+    payload: schemas.TripDetailsUpdateRequest,
+    trip: models.Trip = Depends(get_owned_trip),
+    db: Session = Depends(get_db),
+):
+    if payload.days < 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Trip must be at least 1 day")
+    trip.days = payload.days
+    trip.special_requests = payload.special_requests
+    db.commit()
+    db.refresh(trip)
+    return trip
+
+
 @router.post("/{trip_id}/crew", response_model=schemas.TripOut)
 def add_crew(
     trip_id: UUID,
@@ -87,10 +103,13 @@ def add_crew(
 @router.post("/{trip_id}/route", response_model=schemas.TripOut)
 def draft_route(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: Session = Depends(get_db)):
     """Agent Intake -> Plan the Route. See agent_service.draft_route_stops for the simulation seam."""
+    if trip.days is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Set the trip length (days) before drafting a route")
     for stop in list(trip.route_stops):
         db.delete(stop)
     db.flush()
-    for i, stop in enumerate(agent_service.draft_route_stops(trip.destination_key, trip.destination_raw)):
+    stops = agent_service.draft_route_stops(trip.destination_key, trip.destination_raw, trip.days, trip.special_requests)
+    for i, stop in enumerate(stops):
         db.add(models.RouteStop(trip_id=trip.id, order_index=i, name=stop["name"], notes=stop["notes"]))
     trip.status = "planning"
     db.commit()
@@ -158,7 +177,7 @@ def add_itinerary_item(
     trip: models.Trip = Depends(get_owned_trip),
     db: Session = Depends(get_db),
 ):
-    day, slot = agent_service.next_day_slot(len(trip.items))
+    day, slot = agent_service.next_day_slot(len(trip.items), trip.days or 3)
     db.add(models.ItineraryItem(
         trip_id=trip.id,
         item_type=payload.item_type,
@@ -185,6 +204,8 @@ def update_itinerary_item(
     if not item or item.trip_id != trip.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Itinerary item not found")
     if payload.day_index is not None:
+        if trip.days and not (1 <= payload.day_index <= trip.days):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Day must be between 1 and {trip.days}")
         item.day_index = payload.day_index
     if payload.slot is not None:
         item.slot = payload.slot

@@ -71,6 +71,7 @@ export interface ApiTrip {
   id: string; destination_raw: string; destination_key: string; status: string;
   when_answer: string | null; who_answer: string | null; budget_answer: string | null; pace_answer: string | null;
   is_international: boolean; autonomy_level: string;
+  days: number | null; special_requests: string | null;
   crew: ApiCrewMember[]; route_stops: ApiRouteStop[]; items: ApiItineraryItem[]; change_requests: ApiChangeRequest[];
 }
 export interface ApiDiscoverySuggestion { item_type: string; title: string; cost_estimate: number }
@@ -90,6 +91,12 @@ export const api = {
 
   addCrew: (tripId: string, email: string, role: string) =>
     request<ApiTrip>(`/api/v1/trips/${tripId}/crew`, { method: 'POST', body: JSON.stringify({ email, role }) }),
+
+  setTripDetails: (tripId: string, days: number, specialRequests: string) =>
+    request<ApiTrip>(`/api/v1/trips/${tripId}/details`, {
+      method: 'PATCH',
+      body: JSON.stringify({ days, special_requests: specialRequests || null }),
+    }),
 
   setInternational: (tripId: string, isInternational: boolean) =>
     request<ApiTrip>(`/api/v1/trips/${tripId}/international`, {

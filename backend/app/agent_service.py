@@ -59,15 +59,23 @@ def destination_name(key: str, raw: str) -> str:
     return DESTINATIONS[key]["name"]
 
 
-def draft_route_stops(destination_key: str, raw: str) -> List[Dict[str, str]]:
+def draft_route_stops(
+    destination_key: str, raw: str, days: int, special_requests: Optional[str] = None
+) -> List[Dict[str, str]]:
     """TODO(agent): replace with a Claude tool call — draft_route(destination, answers)."""
     name = destination_name(destination_key, raw)
-    return [
+    explore_notes = "Walkable highlights, no fixed plan"
+    if special_requests:
+        explore_notes = f"{explore_notes} — factoring in: {special_requests}"
+
+    stops = [
         {"name": f"Arrive in {name}", "notes": "Settle in, get oriented"},
-        {"name": f"Explore {name}'s center", "notes": "Walkable highlights, no fixed plan"},
-        {"name": f"Day trip beyond {name}", "notes": "Something outside the city center"},
-        {"name": f"Depart from {name}", "notes": "Buffer time before departure"},
+        {"name": f"Explore {name}'s center", "notes": explore_notes},
     ]
+    if days > 2:
+        stops.append({"name": f"Day trip beyond {name}", "notes": "Something outside the city center"})
+    stops.append({"name": f"Depart from {name}", "notes": "Buffer time before departure"})
+    return stops
 
 
 def discover_catalog(destination_key: str, raw: str) -> List[Dict[str, object]]:
@@ -88,8 +96,8 @@ def budget_cap_for(budget_answer: Optional[str]) -> float:
     return BUDGET_CAPS.get(budget_answer or "", 2800)
 
 
-def next_day_slot(existing_item_count: int):
-    day = existing_item_count // 3 + 1
+def next_day_slot(existing_item_count: int, trip_days: int):
+    day = min(existing_item_count // 3 + 1, trip_days)
     slot = SLOTS[existing_item_count % 3]
     return day, slot
 

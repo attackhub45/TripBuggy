@@ -99,6 +99,11 @@ class InternationalUpdateRequest(BaseModel):
     is_international: bool
 
 
+class TripDetailsUpdateRequest(BaseModel):
+    days: int
+    special_requests: Optional[str] = None
+
+
 class ChangeRequestCreateRequest(BaseModel):
     prompt_text: str
 
@@ -130,6 +135,8 @@ class TripOut(BaseModel):
     pace_answer: Optional[str]
     is_international: bool
     autonomy_level: str
+    days: Optional[int]
+    special_requests: Optional[str]
     crew: List[CrewOut] = []
     route_stops: List[RouteStopOut] = []
     items: List[ItineraryItemOut] = []

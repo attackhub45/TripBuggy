@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { TopBar } from '../components/TopBar';
@@ -22,8 +22,14 @@ export function DiscoverScreen() {
     items: s.items, addSuggestionToItinerary: s.addSuggestionToItinerary, addManualItem: s.addManualItem,
   })));
 
+  const discoveredRef = useRef(false);
   useEffect(() => {
-    if (suggestions.length === 0 && !discoverLoading) discoverOptions();
+    // Same StrictMode double-invocation guard as RouteScreen — see the comment there.
+    if (discoveredRef.current) return;
+    if (suggestions.length === 0 && !discoverLoading) {
+      discoveredRef.current = true;
+      discoverOptions();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -36,6 +36,8 @@ interface TripState {
   answeredOrder: (keyof IntakeAnswers)[];
   crew: CrewMember[];
   isInternational: boolean;
+  days: number | null;
+  specialRequests: string;
 
   // route
   routeStops: RouteStop[];
@@ -59,6 +61,7 @@ interface TripState {
   answerQuestion: (key: keyof IntakeAnswers, value: string) => Promise<void>;
   addCrew: (email: string, role: CrewMember['role']) => Promise<void>;
   setInternational: (v: boolean) => Promise<void>;
+  setTripDetails: (days: number, specialRequests: string) => Promise<void>;
 
   draftRoute: () => Promise<void>;
   addRouteStop: (name: string) => Promise<void>;
@@ -96,6 +99,8 @@ const initialState = {
   answeredOrder: [] as (keyof IntakeAnswers)[],
   crew: [] as CrewMember[],
   isInternational: false,
+  days: null as number | null,
+  specialRequests: '',
 
   routeStops: [] as RouteStop[],
   routeLoading: false,
@@ -136,6 +141,8 @@ function mapTrip(trip: ApiTrip) {
     answeredOrder,
     crew: trip.crew.map((c) => ({ id: c.id, email: c.email, role: c.role as CrewMember['role'] })),
     isInternational: trip.is_international,
+    days: trip.days,
+    specialRequests: trip.special_requests ?? '',
     routeStops: trip.route_stops.map((s) => ({ id: s.id, name: s.name, notes: s.notes ?? '' })),
     items: trip.items.map((i) => ({
       id: i.id,
@@ -189,6 +196,13 @@ export const useTripStore = create<TripState>((set, get) => ({
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.setInternational(tripId, v);
+    set(mapTrip(trip));
+  },
+
+  setTripDetails: async (days, specialRequests) => {
+    const { tripId } = get();
+    if (!tripId || days < 1) return;
+    const trip = await api.setTripDetails(tripId, days, specialRequests);
     set(mapTrip(trip));
   },
 

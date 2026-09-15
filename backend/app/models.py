@@ -41,6 +41,9 @@ class Trip(Base):
     is_international = Column(Boolean, nullable=False, default=False)
     autonomy_level = Column(String, nullable=False, default="approve_each")
 
+    days = Column(Integer, nullable=True)  # required before route drafting — see routers/trips.py draft_route
+    special_requests = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
