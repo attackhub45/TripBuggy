@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { TopBar } from '../components/TopBar';
+import { AgentMessage } from '../components/AgentMessage';
 import { useTripStore } from '../state/tripStore';
 import type { ItemType } from '../state/types';
 
@@ -16,10 +17,11 @@ export function DiscoverScreen() {
   const [manualCost, setManualCost] = useState('');
 
   const {
-    suggestions, discoverLoading, discoverOptions, items, addSuggestionToItinerary, addManualItem,
+    suggestions, discoverLoading, discoverOptions, items, addSuggestionToItinerary, addManualItem, destinationRaw,
   } = useTripStore(useShallow((s) => ({
     suggestions: s.suggestions, discoverLoading: s.discoverLoading, discoverOptions: s.discoverOptions,
     items: s.items, addSuggestionToItinerary: s.addSuggestionToItinerary, addManualItem: s.addManualItem,
+    destinationRaw: s.destinationRaw,
   })));
 
   const discoveredRef = useRef(false);
@@ -40,8 +42,13 @@ export function DiscoverScreen() {
       <TopBar back="/route" />
       <div>
         <p className="mono-label" style={{ marginBottom: 6 }}>Discover &amp; add</p>
-        <h2 style={{ fontSize: 28 }}>Agent surfaces flights, stays, activities</h2>
       </div>
+
+      <AgentMessage thinking={discoverLoading}>
+        {discoverLoading
+          ? `Looking for flights, stays, and activities in ${destinationRaw}…`
+          : `Here's what I found for ${destinationRaw} — add anything you like.`}
+      </AgentMessage>
 
       {cameFromBudgetLoop && (
         <div className="banner warn">Over budget — swap or remove an item, then head back to the itinerary.</div>
