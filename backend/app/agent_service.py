@@ -1,14 +1,21 @@
 """
-Simulated agent layer.
-
-Every function here stands in for a real Claude tool call (see docs/TRD.md §5).
-The logic is ported directly from frontend/src/state/tripStore.ts so the two
-stay in sync — when this gets wired to the real Anthropic API, these are the
-functions to replace; nothing above them (the routers) should need to change.
+Agent layer — real Claude tool calls where an API key is configured, falling back to
+the deterministic simulation (the _simulate_* functions) on any failure: no key set,
+network error, rate limit, or a malformed response. This keeps local dev frictionless
+without a key, and keeps the app resilient rather than crashing when Claude is briefly
+unavailable. See docs/TRD.md §5 for the original design of this seam.
 """
 
+import json
+import logging
 import random
 from typing import Dict, List, Optional
+
+from anthropic import Anthropic
+
+from .config import settings
+
+logger = logging.getLogger(__name__)
 
 DESTINATIONS: Dict[str, Dict] = {
     "paris": {"aliases": ["paris", "france"], "name": "Paris"},
@@ -59,15 +66,152 @@ def destination_name(key: str, raw: str) -> str:
     return DESTINATIONS[key]["name"]
 
 
+def budget_cap_for(budget_answer: Optional[str]) -> float:
+    return BUDGET_CAPS.get(budget_answer or "", 2800)
+
+
+def next_day_slot(existing_item_count: int, trip_days: int):
+    day = min(existing_item_count // 3 + 1, trip_days)
+    slot = SLOTS[existing_item_count % 3]
+    return day, slot
+
+
+# ---------------------------------------------------------------------------
+# Claude client + a small tool-calling helper shared by the three agent tasks
+# ---------------------------------------------------------------------------
+
+_client: Optional[Anthropic] = None
+
+
+def _get_client() -> Optional[Anthropic]:
+    global _client
+    if not settings.anthropic_api_key:
+        return None
+    if _client is None:
+        _client = Anthropic(api_key=settings.anthropic_api_key)
+    return _client
+
+
+def _call_tool(system: str, user: str, tool_name: str, description: str, input_schema: dict) -> dict:
+    client = _get_client()
+    if client is None:
+        raise RuntimeError("no ANTHROPIC_API_KEY configured")
+    response = client.messages.create(
+        model=settings.anthropic_model,
+        max_tokens=1024,
+        system=system,
+        messages=[{"role": "user", "content": user}],
+        tools=[{"name": tool_name, "description": description, "input_schema": input_schema}],
+        tool_choice={"type": "tool", "name": tool_name},
+    )
+    for block in response.content:
+        if block.type == "tool_use" and block.name == tool_name:
+            return block.input
+    raise RuntimeError(f"Claude response did not include the expected '{tool_name}' tool call")
+
+
+def _extract_list_field(result: dict, field: str) -> list:
+    """Claude occasionally double-encodes a complex tool input — instead of
+    {"field": [...]} it sometimes returns {"field": "<the same JSON, as a string>"}.
+    Handle both shapes rather than failing on the second one."""
+    value = result.get(field)
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, list):
+            return parsed
+        if isinstance(parsed, dict) and isinstance(parsed.get(field), list):
+            return parsed[field]
+    raise RuntimeError(f"Claude did not return a usable '{field}' list")
+
+
+# ---------------------------------------------------------------------------
+# Route drafting
+# ---------------------------------------------------------------------------
+
 def draft_route_stops(
-    destination_key: str, raw: str, days: int, special_requests: Optional[str] = None
+    destination_key: str,
+    raw: str,
+    days: int,
+    special_requests: Optional[str] = None,
+    when_answer: Optional[str] = None,
+    who_answer: Optional[str] = None,
+    budget_answer: Optional[str] = None,
+    pace_answer: Optional[str] = None,
 ) -> List[Dict[str, str]]:
-    """TODO(agent): replace with a Claude tool call — draft_route(destination, answers)."""
     name = destination_name(destination_key, raw)
+    # The real agent can reason about any place, so give it exactly what the customer
+    # typed — not the canonicalized name from our small 8-destination matcher, which
+    # exists for the destination-art lookup and the simulated fallback, not for this.
+    agent_destination = raw.strip() or name
+    try:
+        return _agent_draft_route_stops(agent_destination, days, special_requests, when_answer, who_answer, budget_answer, pace_answer)
+    except Exception as exc:
+        logger.warning("Route drafting fell back to simulation: %s", exc)
+        return _simulate_draft_route_stops(name, days, special_requests)
+
+
+def _agent_draft_route_stops(
+    name: str, days: int, special_requests: Optional[str],
+    when_answer: Optional[str], who_answer: Optional[str], budget_answer: Optional[str], pace_answer: Optional[str],
+) -> List[Dict[str, str]]:
+    context = [f"Destination: {name}", f"Trip length: {days} day{'s' if days != 1 else ''}"]
+    if when_answer:
+        context.append(f"When: {when_answer}")
+    if who_answer:
+        context.append(f"Who's coming: {who_answer}")
+    if budget_answer:
+        context.append(f"Budget vibe: {budget_answer}")
+    if pace_answer:
+        context.append(f"Pace: {pace_answer}")
+    if special_requests:
+        context.append(f"Special requests: {special_requests}")
+
+    result = _call_tool(
+        system=(
+            "You are the trip-planning agent for TripBuggy. You draft concise, concrete routes grounded in "
+            "real knowledge of the destination — use actual neighborhoods, landmarks, and place names, not "
+            "generic placeholders."
+        ),
+        user=(
+            "Draft a short, high-level route for this trip — 3 to 6 waypoint-style stops (not a literal "
+            "day-by-day schedule), covering arrival through departure. Keep each note to one short sentence.\n\n"
+            + "\n".join(context)
+        ),
+        tool_name="propose_route",
+        description="Return the drafted route stops for this trip, in visiting order.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "stops": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 6,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string", "description": "Short stop name, e.g. 'Explore Montmartre'"},
+                            "notes": {"type": "string", "description": "One-sentence note about this stop"},
+                        },
+                        "required": ["name", "notes"],
+                    },
+                }
+            },
+            "required": ["stops"],
+        },
+    )
+    stops = _extract_list_field(result, "stops")
+    return [{"name": str(s["name"]), "notes": str(s["notes"])} for s in stops]
+
+
+def _simulate_draft_route_stops(name: str, days: int, special_requests: Optional[str]) -> List[Dict[str, str]]:
     explore_notes = "Walkable highlights, no fixed plan"
     if special_requests:
         explore_notes = f"{explore_notes} — factoring in: {special_requests}"
-
     stops = [
         {"name": f"Arrive in {name}", "notes": "Settle in, get oriented"},
         {"name": f"Explore {name}'s center", "notes": explore_notes},
@@ -78,9 +222,87 @@ def draft_route_stops(
     return stops
 
 
-def discover_catalog(destination_key: str, raw: str) -> List[Dict[str, object]]:
-    """TODO(agent): replace with a real flights/stays/activities search API — search_catalog(criteria)."""
+# ---------------------------------------------------------------------------
+# Catalog discovery
+# ---------------------------------------------------------------------------
+
+def discover_catalog(
+    destination_key: str,
+    raw: str,
+    when_answer: Optional[str] = None,
+    who_answer: Optional[str] = None,
+    budget_answer: Optional[str] = None,
+    pace_answer: Optional[str] = None,
+    route_stop_names: Optional[List[str]] = None,
+) -> List[Dict[str, object]]:
     name = destination_name(destination_key, raw)
+    agent_destination = raw.strip() or name
+    try:
+        return _agent_discover_catalog(agent_destination, when_answer, who_answer, budget_answer, pace_answer, route_stop_names)
+    except Exception as exc:
+        logger.warning("Catalog discovery fell back to simulation: %s", exc)
+        return _simulate_discover_catalog(destination_key, name)
+
+
+def _agent_discover_catalog(
+    name: str, when_answer: Optional[str], who_answer: Optional[str], budget_answer: Optional[str],
+    pace_answer: Optional[str], route_stop_names: Optional[List[str]],
+) -> List[Dict[str, object]]:
+    context = [f"Destination: {name}"]
+    if when_answer:
+        context.append(f"When: {when_answer}")
+    if who_answer:
+        context.append(f"Who's coming: {who_answer}")
+    if budget_answer:
+        context.append(f"Budget vibe: {budget_answer}")
+    if pace_answer:
+        context.append(f"Pace: {pace_answer}")
+    if route_stop_names:
+        context.append("Planned route: " + ", ".join(route_stop_names))
+
+    result = _call_tool(
+        system=(
+            "You are the trip-planning agent for TripBuggy. You surface flight, stay, and activity options. "
+            "This is simulated inventory, not a live booking search — prioritize specific, appealing, "
+            "destination-grounded titles over exact real-world pricing."
+        ),
+        user=(
+            "Surface exactly 6 options to add to this itinerary: one outbound flight, one return flight, one "
+            "stay, and three activities. Cost estimates should be plausible in USD and should reflect the "
+            "stated budget vibe (Budget-friendly should feel noticeably cheaper than Treat yourself).\n\n"
+            + "\n".join(context)
+        ),
+        tool_name="propose_options",
+        description="Return the surfaced flight/stay/activity options.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": "array",
+                    "minItems": 6,
+                    "maxItems": 6,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "item_type": {"type": "string", "enum": ["flight", "stay", "activity"]},
+                            "title": {"type": "string"},
+                            "cost_estimate": {"type": "number"},
+                        },
+                        "required": ["item_type", "title", "cost_estimate"],
+                    },
+                }
+            },
+            "required": ["options"],
+        },
+    )
+    options = _extract_list_field(result, "options")
+    return [
+        {"item_type": str(o["item_type"]), "title": str(o["title"]), "cost_estimate": float(o["cost_estimate"])}
+        for o in options
+    ]
+
+
+def _simulate_discover_catalog(destination_key: str, name: str) -> List[Dict[str, object]]:
     activities = ACTIVITY_POOL.get(destination_key, ACTIVITY_POOL["fallback"])
     return [
         {"item_type": "flight", "title": f"Flight to {name}", "cost_estimate": 420},
@@ -92,15 +314,44 @@ def discover_catalog(destination_key: str, raw: str) -> List[Dict[str, object]]:
     ]
 
 
-def budget_cap_for(budget_answer: Optional[str]) -> float:
-    return BUDGET_CAPS.get(budget_answer or "", 2800)
+# ---------------------------------------------------------------------------
+# On-the-road change interpretation
+# ---------------------------------------------------------------------------
+
+def interpret_change_request(prompt_text: str, booked_items: List[Dict[str, str]]) -> Optional[str]:
+    """Returns the id of the booked item most likely affected by this change request, or None.
+    booked_items: [{"id": ..., "title": ..., "item_type": ...}, ...]."""
+    if not booked_items:
+        return None
+    try:
+        return _agent_interpret_change(prompt_text, booked_items)
+    except Exception as exc:
+        logger.warning("Change-request interpretation fell back to a random pick: %s", exc)
+        return random.choice(booked_items)["id"]
 
 
-def next_day_slot(existing_item_count: int, trip_days: int):
-    day = min(existing_item_count // 3 + 1, trip_days)
-    slot = SLOTS[existing_item_count % 3]
-    return day, slot
-
-
-def pick_random(items: list):
-    return random.choice(items) if items else None
+def _agent_interpret_change(prompt_text: str, booked_items: List[Dict[str, str]]) -> Optional[str]:
+    listing = "\n".join(f"{i}: [{item['item_type']}] {item['title']}" for i, item in enumerate(booked_items))
+    result = _call_tool(
+        system="You are the trip-planning agent for TripBuggy, handling an on-the-road change request.",
+        user=(
+            f'A traveler on this trip just said: "{prompt_text}"\n\n'
+            f"Currently booked items:\n{listing}\n\n"
+            "Which single booked item, if any, is most likely affected by this? Respond with its index, "
+            "or -1 if none of them are clearly affected."
+        ),
+        tool_name="pick_affected_item",
+        description="Identify which booked item (by index) is affected by the traveler's message.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "item_index": {"type": "integer", "description": "Index of the affected item, or -1 if none"},
+                "reasoning": {"type": "string"},
+            },
+            "required": ["item_index", "reasoning"],
+        },
+    )
+    idx = result.get("item_index")
+    if isinstance(idx, int) and 0 <= idx < len(booked_items):
+        return booked_items[idx]["id"]
+    return None

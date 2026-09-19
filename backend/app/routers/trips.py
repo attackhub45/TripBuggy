@@ -120,13 +120,17 @@ def add_crew(
 
 @router.post("/{trip_id}/route", response_model=schemas.TripOut)
 def draft_route(trip_id: UUID, trip: models.Trip = Depends(require_editor), db: Session = Depends(get_db)):
-    """Agent Intake -> Plan the Route. See agent_service.draft_route_stops for the simulation seam."""
+    """Agent Intake -> Plan the Route. See agent_service.draft_route_stops — real Claude call when
+    ANTHROPIC_API_KEY is set, simulated otherwise."""
     if trip.days is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Set the trip length (days) before drafting a route")
     for stop in list(trip.route_stops):
         db.delete(stop)
     db.flush()
-    stops = agent_service.draft_route_stops(trip.destination_key, trip.destination_raw, trip.days, trip.special_requests)
+    stops = agent_service.draft_route_stops(
+        trip.destination_key, trip.destination_raw, trip.days, trip.special_requests,
+        trip.when_answer, trip.who_answer, trip.budget_answer, trip.pace_answer,
+    )
     for i, stop in enumerate(stops):
         db.add(models.RouteStop(trip_id=trip.id, order_index=i, name=stop["name"], notes=stop["notes"]))
     trip.status = "planning"
@@ -184,8 +188,14 @@ def remove_route_stop(
 
 @router.post("/{trip_id}/discover", response_model=list[schemas.DiscoverySuggestion])
 def discover_options(trip_id: UUID, trip: models.Trip = Depends(require_editor)):
-    """Discover & Add. See agent_service.discover_catalog for the real-search-API seam."""
-    return agent_service.discover_catalog(trip.destination_key, trip.destination_raw)
+    """Discover & Add. Real Claude call when ANTHROPIC_API_KEY is set, simulated otherwise —
+    see agent_service.discover_catalog. The real search-API seam (live vendor inventory) is
+    still a later phase; this call surfaces plausible options, not live pricing."""
+    route_names = [s.name for s in sorted(trip.route_stops, key=lambda s: s.order_index)]
+    return agent_service.discover_catalog(
+        trip.destination_key, trip.destination_raw,
+        trip.when_answer, trip.who_answer, trip.budget_answer, trip.pace_answer, route_names,
+    )
 
 
 @router.post("/{trip_id}/itinerary-items", response_model=schemas.TripOut)
@@ -317,9 +327,13 @@ def submit_change_request(
     trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
-    """On the Road -> loops back into Agentic Booking. See BRD.md 'On the Road' stage."""
+    """On the Road -> loops back into Agentic Booking. See BRD.md 'On the Road' stage. Which item is
+    affected is a real Claude call (agent_service.interpret_change_request) when a key is configured,
+    falling back to a random pick among booked items otherwise."""
     booked = [i for i in trip.items if i.status == "simulated_booked"]
-    target = agent_service.pick_random(booked)
+    booked_dicts = [{"id": str(i.id), "title": i.title, "item_type": i.item_type} for i in booked]
+    target_id = agent_service.interpret_change_request(payload.prompt_text, booked_dicts)
+    target = next((i for i in booked if str(i.id) == target_id), None) if target_id else None
     db.add(models.ChangeRequest(
         trip_id=trip.id,
         prompt_text=payload.prompt_text,
