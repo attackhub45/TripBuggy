@@ -204,4 +204,14 @@ export const api = {
     request<ApiTrip>(`/api/v1/trips/${tripId}/change-requests`, { method: 'POST', body: JSON.stringify({ prompt_text: promptText }) }),
 
   completeTrip: (tripId: string) => request<ApiTrip>(`/api/v1/trips/${tripId}/complete`, { method: 'POST' }),
+
+  deleteTrip: (tripId: string) => request<void>(`/api/v1/trips/${tripId}`, { method: 'DELETE' }),
+
+  listTemplates: () => request<ApiTripSummary[]>('/api/v1/trips/templates'),
+
+  saveAsTemplate: (tripId: string) =>
+    request<ApiTripSummary>(`/api/v1/trips/${tripId}/save-as-template`, { method: 'POST' }),
+
+  createTripFromTemplate: (templateId: string) =>
+    request<ApiTrip>(`/api/v1/trips/from-template/${templateId}`, { method: 'POST' }),
 };

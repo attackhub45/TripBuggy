@@ -9,13 +9,26 @@ const TYPE_LABEL = { flight: 'Flight', stay: 'Stay', activity: 'Activity' };
 export function RecapScreen() {
   const navigate = useNavigate();
   const [savedAsTemplate, setSavedAsTemplate] = useState(false);
-  const { destinationRaw, destKey, items, reset } = useTripStore(useShallow((s) => ({
+  const [saving, setSaving] = useState(false);
+  const { destinationRaw, destKey, items, reset, saveAsTemplate, myRole } = useTripStore(useShallow((s) => ({
     destinationRaw: s.destinationRaw, destKey: s.destKey, items: s.items, reset: s.reset,
+    saveAsTemplate: s.saveAsTemplate, myRole: s.myRole,
   })));
+  const isOwner = myRole === 'owner';
 
   function startOver() {
     reset();
     navigate('/');
+  }
+
+  async function saveTemplate() {
+    setSaving(true);
+    try {
+      await saveAsTemplate();
+      setSavedAsTemplate(true);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -34,12 +47,14 @@ export function RecapScreen() {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
         <div style={{ display: 'flex', gap: 16 }}>
-          <button className="btn-secondary" disabled={savedAsTemplate} onClick={() => setSavedAsTemplate(true)}>
-            {savedAsTemplate ? 'Saved as template' : 'Save as template'}
-          </button>
+          {isOwner && (
+            <button className="btn-secondary" disabled={savedAsTemplate || saving} onClick={() => void saveTemplate()}>
+              {savedAsTemplate ? 'Saved as template' : saving ? 'Saving…' : 'Save as template'}
+            </button>
+          )}
           <button className="btn-text" onClick={startOver}>Plan another trip</button>
         </div>
-        {savedAsTemplate && <p className="mono-label">You can start a new trip from this one next time.</p>}
+        {savedAsTemplate && <p className="mono-label">Find it under "My trips" next time you start a new one.</p>}
       </div>
     </div>
   );

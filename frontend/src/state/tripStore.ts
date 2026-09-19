@@ -63,6 +63,8 @@ interface TripState {
   // actions
   loadTrip: (tripId: string) => Promise<void>;
   startTrip: (raw: string) => Promise<void>;
+  startFromTemplate: (templateId: string) => Promise<void>;
+  saveAsTemplate: () => Promise<void>;
   answerQuestion: (key: keyof IntakeAnswers, value: string) => Promise<void>;
   addCrew: (email: string, role: CrewMember['role']) => Promise<void>;
   setInternational: (v: boolean) => Promise<void>;
@@ -225,6 +227,26 @@ export const useTripStore = create<TripState>((set, get) => ({
       trip = await api.createTrip(raw);
     }
     set(applyTrip(trip));
+  },
+
+  startFromTemplate: async (templateId) => {
+    set({ ...initialState });
+    await ensureAuthenticated();
+    let trip: ApiTrip;
+    try {
+      trip = await api.createTripFromTemplate(templateId);
+    } catch (err) {
+      if (!(err instanceof AuthError)) throw err;
+      await ensureAuthenticated();
+      trip = await api.createTripFromTemplate(templateId);
+    }
+    set(applyTrip(trip));
+  },
+
+  saveAsTemplate: async () => {
+    const { tripId } = get();
+    if (!tripId) return;
+    await withToast(() => api.saveAsTemplate(tripId));
   },
 
   answerQuestion: async (key, value) => {

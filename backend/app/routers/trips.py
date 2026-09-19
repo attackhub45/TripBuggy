@@ -23,8 +23,9 @@ def _resolve_change_requests_if_clear(trip: models.Trip) -> None:
 
 @router.get("", response_model=list[schemas.TripSummaryOut])
 def list_trips(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
-    """Trips you own, plus trips you're a crew member on (matched by email)."""
-    owned = db.query(models.Trip).filter(models.Trip.user_id == user.id).all()
+    """Trips you own, plus trips you're a crew member on (matched by email). Templates are
+    saved starting points, not trips in progress — they have their own list_templates."""
+    owned = db.query(models.Trip).filter(models.Trip.user_id == user.id, models.Trip.is_template.is_(False)).all()
     crew_trip_ids = {
         c.trip_id for c in db.query(models.CrewMember).filter(models.CrewMember.email.ilike(user.email)).all()
     }
@@ -39,6 +40,21 @@ def list_trips(db: Session = Depends(get_db), user: models.User = Depends(get_cu
     return results
 
 
+@router.get("/templates", response_model=list[schemas.TripSummaryOut])
+def list_templates(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    """Templates you've saved from past trips — see save_as_template. Registered ahead of
+    GET /{trip_id} so "templates" isn't swallowed as a trip_id path parameter."""
+    templates = (
+        db.query(models.Trip)
+        .filter(models.Trip.user_id == user.id, models.Trip.is_template.is_(True))
+        .order_by(models.Trip.created_at.desc())
+        .all()
+    )
+    for t in templates:
+        t.my_role = "owner"
+    return templates
+
+
 @router.post("", response_model=schemas.TripOut, status_code=status.HTTP_201_CREATED)
 def create_trip(
     payload: schemas.TripCreateRequest,
@@ -51,6 +67,39 @@ def create_trip(
         destination_key=agent_service.match_destination(payload.destination),
     )
     db.add(trip)
+    db.commit()
+    db.refresh(trip)
+    return trip
+
+
+@router.post("/from-template/{template_id}", response_model=schemas.TripOut, status_code=status.HTTP_201_CREATED)
+def create_trip_from_template(
+    template_id: UUID,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    """Starts a new trip pre-filled from a saved template — same destination, intake
+    answers, and route stops, but a fresh booking-free trip owned by the caller."""
+    template = db.get(models.Trip, template_id)
+    if not template or not template.is_template or template.user_id != user.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+
+    trip = models.Trip(
+        user_id=user.id,
+        destination_raw=template.destination_raw,
+        destination_key=template.destination_key,
+        when_answer=template.when_answer,
+        who_answer=template.who_answer,
+        budget_answer=template.budget_answer,
+        pace_answer=template.pace_answer,
+        is_international=template.is_international,
+        days=template.days,
+        special_requests=template.special_requests,
+    )
+    db.add(trip)
+    db.flush()
+    for stop in sorted(template.route_stops, key=lambda s: s.order_index):
+        db.add(models.RouteStop(trip_id=trip.id, order_index=stop.order_index, name=stop.name, notes=stop.notes))
     db.commit()
     db.refresh(trip)
     return trip
@@ -353,3 +402,38 @@ def complete_trip(trip_id: UUID, trip: models.Trip = Depends(require_editor), db
     db.commit()
     db.refresh(trip)
     return trip
+
+
+@router.delete("/{trip_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_trip(trip_id: UUID, trip: models.Trip = Depends(require_owner), db: Session = Depends(get_db)):
+    """Only the owner can delete — matches the crew-invite permission level, not just editor."""
+    db.delete(trip)
+    db.commit()
+
+
+@router.post("/{trip_id}/save-as-template", response_model=schemas.TripSummaryOut, status_code=status.HTTP_201_CREATED)
+def save_as_template(trip_id: UUID, trip: models.Trip = Depends(require_owner), db: Session = Depends(get_db)):
+    """Freezes this trip's destination, intake answers, and route into a reusable
+    template — not the itinerary items, crew, or booking/change-request history, since
+    those belong to this specific trip rather than the general plan."""
+    template = models.Trip(
+        user_id=trip.user_id,
+        destination_raw=trip.destination_raw,
+        destination_key=trip.destination_key,
+        when_answer=trip.when_answer,
+        who_answer=trip.who_answer,
+        budget_answer=trip.budget_answer,
+        pace_answer=trip.pace_answer,
+        is_international=trip.is_international,
+        days=trip.days,
+        special_requests=trip.special_requests,
+        is_template=True,
+    )
+    db.add(template)
+    db.flush()
+    for stop in sorted(trip.route_stops, key=lambda s: s.order_index):
+        db.add(models.RouteStop(trip_id=template.id, order_index=stop.order_index, name=stop.name, notes=stop.notes))
+    db.commit()
+    db.refresh(template)
+    template.my_role = "owner"
+    return template

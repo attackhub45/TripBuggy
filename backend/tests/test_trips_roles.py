@@ -75,6 +75,18 @@ def test_crew_membership_is_matched_case_insensitively(client, owned_trip, make_
     assert r.json()["my_role"] == "editor"
 
 
+def test_only_the_owner_can_delete_the_trip(client, owned_trip, make_user):
+    owner_headers, trip = owned_trip
+    editor_headers, editor_email = make_user(email="editordelete@example.com")
+    _invite(client, owner_headers, trip["id"], editor_email, "editor")
+
+    r = client.delete(f"/api/v1/trips/{trip['id']}", headers=editor_headers)
+    assert r.status_code == 403
+
+    r = client.delete(f"/api/v1/trips/{trip['id']}", headers=owner_headers)
+    assert r.status_code == 204
+
+
 def test_list_trips_includes_crew_trips(client, owned_trip, make_user):
     owner_headers, trip = owned_trip
     viewer_headers, viewer_email = make_user(email="crewlist@example.com")

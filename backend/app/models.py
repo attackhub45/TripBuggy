@@ -44,6 +44,11 @@ class Trip(Base):
     days = Column(Integer, nullable=True)  # required before route drafting — see routers/trips.py draft_route
     special_requests = Column(Text, nullable=True)
 
+    # A saved starting point (destination, answers, route) rather than a trip in progress —
+    # see routers/trips.py save_as_template / create_trip_from_template. Excluded from the
+    # normal "my trips" listing.
+    is_template = Column(Boolean, nullable=False, default=False)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

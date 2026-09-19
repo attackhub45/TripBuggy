@@ -270,6 +270,92 @@ def test_complete_trip_sets_status(client, trip):
     assert r.json()["status"] == "complete"
 
 
+def test_save_as_template_copies_plan_not_bookings(client, trip):
+    headers, created = trip
+    trip_id = created["id"]
+    client.post(
+        f"/api/v1/trips/{trip_id}/intake-answers",
+        json={"question_key": "who", "answer_value": "Just me"},
+        headers=headers,
+    )
+    client.patch(f"/api/v1/trips/{trip_id}/details", json={"days": 5}, headers=headers)
+    client.post(f"/api/v1/trips/{trip_id}/route", headers=headers)
+    client.post(
+        f"/api/v1/trips/{trip_id}/itinerary-items",
+        json={"item_type": "activity", "title": "Tour", "cost_estimate": 20, "source": "manual"},
+        headers=headers,
+    )
+
+    r = client.post(f"/api/v1/trips/{trip_id}/save-as-template", headers=headers)
+    assert r.status_code == 201
+    template_id = r.json()["id"]
+    assert template_id != trip_id
+
+    # Templates don't show up in the normal trips list...
+    r = client.get("/api/v1/trips", headers=headers)
+    assert template_id not in [t["id"] for t in r.json()]
+
+    # ...but do show up in the templates list, and carry the route without the itinerary item.
+    r = client.get("/api/v1/trips/templates", headers=headers)
+    assert r.status_code == 200
+    listed = [t for t in r.json() if t["id"] == template_id][0]
+    assert listed["destination_raw"] == created["destination_raw"]
+    assert listed["days"] == 5
+
+    r = client.get(f"/api/v1/trips/{template_id}", headers=headers)
+    template = r.json()
+    assert len(template["route_stops"]) >= 3
+    assert template["items"] == []
+    assert template["who_answer"] == "Just me"
+
+
+def test_only_the_owner_can_save_a_template(client, trip, make_user):
+    owner_headers, created = trip
+    editor_headers, editor_email = make_user(email="templateeditor@example.com")
+    r = client.post(
+        f"/api/v1/trips/{created['id']}/crew",
+        json={"email": editor_email, "role": "editor"},
+        headers=owner_headers,
+    )
+    assert r.status_code == 200
+    r = client.post(f"/api/v1/trips/{created['id']}/save-as-template", headers=editor_headers)
+    assert r.status_code == 403
+
+
+def test_create_trip_from_template_starts_a_fresh_trip(client, trip):
+    headers, created = trip
+    trip_id = created["id"]
+    client.patch(f"/api/v1/trips/{trip_id}/details", json={"days": 5}, headers=headers)
+    client.post(f"/api/v1/trips/{trip_id}/route", headers=headers)
+    template_id = client.post(f"/api/v1/trips/{trip_id}/save-as-template", headers=headers).json()["id"]
+
+    r = client.post(f"/api/v1/trips/from-template/{template_id}", headers=headers)
+    assert r.status_code == 201
+    new_trip = r.json()
+    assert new_trip["id"] not in (trip_id, template_id)
+    assert new_trip["destination_raw"] == created["destination_raw"]
+    assert new_trip["days"] == 5
+    assert len(new_trip["route_stops"]) >= 3
+    assert new_trip["items"] == []
+    assert new_trip["status"] == "intake"
+
+
+def test_create_trip_from_template_rejects_someone_else_s_template(client, trip, make_user):
+    headers, created = trip
+    template_id = client.post(f"/api/v1/trips/{created['id']}/save-as-template", headers=headers).json()["id"]
+    other_headers, _ = make_user(email="templatestranger@example.com")
+    r = client.post(f"/api/v1/trips/from-template/{template_id}", headers=other_headers)
+    assert r.status_code == 404
+
+
+def test_delete_trip_removes_it(client, trip):
+    headers, created = trip
+    r = client.delete(f"/api/v1/trips/{created['id']}", headers=headers)
+    assert r.status_code == 204
+    r = client.get(f"/api/v1/trips/{created['id']}", headers=headers)
+    assert r.status_code == 404
+
+
 def test_list_trips_returns_only_the_caller_s_trips(client, make_user):
     headers_a, _ = make_user()
     headers_b, _ = make_user()
