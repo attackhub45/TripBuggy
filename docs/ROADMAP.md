@@ -24,10 +24,14 @@ A prioritized punch-list of what's left across the build and deployment, as of 2
 
 **Known follow-up, not a security gap:** the frontend doesn't yet disable mutating buttons for viewers — the backend correctly rejects the write (403), but a viewer currently sees an enabled "Add" button that then fails. Cosmetic; worth a small pass later.
 
-## Tier 3 — Polish
+## Tier 3 — Polish ✅ done (2026-09-19)
 
-- [ ] **Agent presence on Route + Booking** — The avatar/speech-bubble pattern (`AgentMessage`) only shipped on Discover & Add so far. Bring it to Plan the Route and Agentic Booking for consistency.
-- [ ] **Global error/notification pattern** — Most failures currently just fail silently to the console. Only the Home screen has a hand-built inline error. Needs a real toast/banner system.
+- [x] **Agent presence on Route + Booking** — `AgentMessage` now appears on `RouteScreen` (drafting/drafted, naming the destination) and `BookingScreen` (reflects the chosen autonomy level, a running-booking state, and an all-booked state). Verified live on a Lisbon trip.
+- [x] **Global error/notification pattern** — New `toastStore` + `ToastHost`, mounted once in `App.tsx`. Every trip-mutating action in `tripStore.ts` that previously threw into the void now routes through a `withToast` wrapper that surfaces a readable message (via `lib/errors.ts`, which unwraps FastAPI's `{"detail": ...}` body) before rethrowing. `startTrip`/`loadTrip` were left alone — they already have dedicated inline error UI in `HomeScreen`/`App.tsx`.
+
+  Found and fixed a real bug along the way: `OnTheRoadScreen`'s change-request submit used to navigate to Booking regardless of whether the request succeeded; it now awaits the result and stays put on failure.
+
+  Verified live: killed the backend mid-flow on the Booking screen and confirmed the toast fired with "Could not reach the backend — is it running?", the item stayed in its prior state (no silent corruption), and dismiss worked; restarted the backend and confirmed approvals resumed normally.
 
 ## Tier 4 — Engineering hygiene (do before or alongside Azure)
 
