@@ -2,10 +2,16 @@ import { useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { TopBar } from '../components/TopBar';
 import { AutonomyDial } from '../components/AutonomyDial';
+import { AgentMessage } from '../components/AgentMessage';
 import { useTripStore } from '../state/tripStore';
 
 const TYPE_LABEL = { flight: 'Flight', stay: 'Stay', activity: 'Activity' };
 const STATUS_LABEL = { proposed: 'Proposed', pending_approval: 'Awaiting approval', simulated_booked: 'Booked' };
+const AUTONOMY_MESSAGE = {
+  draft_only: "You're keeping this as a draft — I won't book anything until you turn up the autonomy dial.",
+  approve_each: "I'll get each item ready to book, then wait for your approval before it's confirmed.",
+  full_auto: "You've given me full autonomy — I'll book everything without waiting for approval.",
+};
 
 export function BookingScreen() {
   const navigate = useNavigate();
@@ -23,6 +29,12 @@ export function BookingScreen() {
   const needsRun = autonomyLevel !== 'draft_only' && items.some((i) => i.status !== 'simulated_booked');
   const runLabel = autonomyLevel === 'full_auto' ? 'Book everything' : 'Send for approval';
 
+  const agentText = bookingRunning
+    ? 'Working through your itinerary…'
+    : allBooked
+      ? "Everything's booked. Ready to hit the road?"
+      : AUTONOMY_MESSAGE[autonomyLevel];
+
   function hitTheRoad() {
     if (activeChangeRequest) resolveActiveChange();
     navigate('/road');
@@ -35,6 +47,8 @@ export function BookingScreen() {
         <p className="mono-label" style={{ marginBottom: 6 }}>Agentic booking</p>
         <h2 style={{ fontSize: 28 }}>Tell the agent what to book</h2>
       </div>
+
+      <AgentMessage thinking={bookingRunning}>{agentText}</AgentMessage>
 
       {activeChangeRequest && (
         <div className="banner info">Resolving an on-the-road change: "{activeChangeRequest.text}"</div>

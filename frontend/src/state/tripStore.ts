@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import { matchDestination, type DestinationKey } from '../art/DestinationArt';
 import { api, ensureAuthenticated, setActiveTripId, AuthError, type ApiTrip } from '../api/client';
+import { useToastStore } from './toastStore';
+import { friendlyMessage } from '../lib/errors';
 import type {
   IntakeAnswers, RouteStop, ItineraryItem, CrewMember, ChangeRequest,
   AutonomyLevel, ItemType, ItemStatus, Slot,
@@ -180,6 +182,20 @@ function applyTrip(trip: ApiTrip) {
   return mapTrip(trip);
 }
 
+/**
+ * Runs an API call and, on failure, surfaces a toast with a readable message before
+ * rethrowing (so any loading-state cleanup a caller still does keeps working). startTrip
+ * and loadTrip skip this — they already have dedicated error UI in HomeScreen/App.tsx.
+ */
+async function withToast<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    useToastStore.getState().pushToast(friendlyMessage(err));
+    throw err;
+  }
+}
+
 export const useTripStore = create<TripState>((set, get) => ({
   ...initialState,
 
@@ -214,28 +230,28 @@ export const useTripStore = create<TripState>((set, get) => ({
   answerQuestion: async (key, value) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.submitIntakeAnswer(tripId, key, value);
+    const trip = await withToast(() => api.submitIntakeAnswer(tripId, key, value));
     set(applyTrip(trip));
   },
 
   addCrew: async (email, role) => {
     const { tripId } = get();
     if (!tripId || !email.trim()) return;
-    const trip = await api.addCrew(tripId, email.trim(), role);
+    const trip = await withToast(() => api.addCrew(tripId, email.trim(), role));
     set(applyTrip(trip));
   },
 
   setInternational: async (v) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.setInternational(tripId, v);
+    const trip = await withToast(() => api.setInternational(tripId, v));
     set(applyTrip(trip));
   },
 
   setTripDetails: async (days, specialRequests) => {
     const { tripId } = get();
     if (!tripId || days < 1) return;
-    const trip = await api.setTripDetails(tripId, days, specialRequests);
+    const trip = await withToast(() => api.setTripDetails(tripId, days, specialRequests));
     set(applyTrip(trip));
   },
 
@@ -244,7 +260,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     if (!tripId) return;
     set({ routeLoading: true });
     try {
-      const trip = await api.draftRoute(tripId);
+      const trip = await withToast(() => api.draftRoute(tripId));
       set({ ...applyTrip(trip), routeLoading: false });
     } catch (err) {
       set({ routeLoading: false });
@@ -255,21 +271,21 @@ export const useTripStore = create<TripState>((set, get) => ({
   addRouteStop: async (name) => {
     const { tripId } = get();
     if (!tripId || !name.trim()) return;
-    const trip = await api.addRouteStop(tripId, name.trim());
+    const trip = await withToast(() => api.addRouteStop(tripId, name.trim()));
     set(applyTrip(trip));
   },
 
   removeRouteStop: async (id) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.removeRouteStop(tripId, id);
+    const trip = await withToast(() => api.removeRouteStop(tripId, id));
     set(applyTrip(trip));
   },
 
   moveRouteStop: async (id, dir) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.moveRouteStop(tripId, id, dir);
+    const trip = await withToast(() => api.moveRouteStop(tripId, id, dir));
     set(applyTrip(trip));
   },
 
@@ -278,7 +294,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     if (!tripId) return;
     set({ discoverLoading: true });
     try {
-      const raw = await api.discoverOptions(tripId);
+      const raw = await withToast(() => api.discoverOptions(tripId));
       const suggestions: ItineraryItem[] = raw.map((s) => ({
         id: uid('sug'),
         type: s.item_type as ItemType,
@@ -301,28 +317,28 @@ export const useTripStore = create<TripState>((set, get) => ({
     if (!tripId) return;
     const s = suggestions.find((x) => x.id === suggestionId);
     if (!s) return;
-    const trip = await api.addItineraryItem(tripId, s.type, s.title, s.cost, 'agent');
+    const trip = await withToast(() => api.addItineraryItem(tripId, s.type, s.title, s.cost, 'agent'));
     set(applyTrip(trip));
   },
 
   addManualItem: async (title, type, cost) => {
     const { tripId } = get();
     if (!tripId || !title.trim()) return;
-    const trip = await api.addItineraryItem(tripId, type, title.trim(), cost, 'manual');
+    const trip = await withToast(() => api.addItineraryItem(tripId, type, title.trim(), cost, 'manual'));
     set(applyTrip(trip));
   },
 
   removeItem: async (id) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.removeItineraryItem(tripId, id);
+    const trip = await withToast(() => api.removeItineraryItem(tripId, id));
     set(applyTrip(trip));
   },
 
   setItemSlot: async (id, day, slot) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.updateItineraryItem(tripId, id, { day_index: day, slot });
+    const trip = await withToast(() => api.updateItineraryItem(tripId, id, { day_index: day, slot }));
     set(applyTrip(trip));
   },
 
@@ -343,7 +359,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   setAutonomy: async (level) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.setAutonomy(tripId, level);
+    const trip = await withToast(() => api.setAutonomy(tripId, level));
     set(applyTrip(trip));
   },
 
@@ -352,7 +368,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     if (!tripId || autonomyLevel === 'draft_only') return;
     set({ bookingRunning: true });
     try {
-      const trip = await api.runBooking(tripId);
+      const trip = await withToast(() => api.runBooking(tripId));
       set({ ...applyTrip(trip), bookingRunning: false });
     } catch (err) {
       set({ bookingRunning: false });
@@ -363,14 +379,14 @@ export const useTripStore = create<TripState>((set, get) => ({
   approveItem: async (id) => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.approveItem(tripId, id);
+    const trip = await withToast(() => api.approveItem(tripId, id));
     set(applyTrip(trip));
   },
 
   submitChangeRequest: async (text) => {
     const { tripId } = get();
     if (!tripId || !text.trim()) return;
-    const trip = await api.submitChangeRequest(tripId, text.trim());
+    const trip = await withToast(() => api.submitChangeRequest(tripId, text.trim()));
     set(applyTrip(trip));
   },
 
@@ -379,7 +395,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   completeTrip: async () => {
     const { tripId } = get();
     if (!tripId) return;
-    const trip = await api.completeTrip(tripId);
+    const trip = await withToast(() => api.completeTrip(tripId));
     set(applyTrip(trip));
   },
 

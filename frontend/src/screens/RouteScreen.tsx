@@ -2,16 +2,18 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { TopBar } from '../components/TopBar';
+import { AgentMessage } from '../components/AgentMessage';
 import { useTripStore } from '../state/tripStore';
 
 export function RouteScreen() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const {
-    routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop,
+    routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop, destinationRaw,
   } = useTripStore(useShallow((s) => ({
     routeStops: s.routeStops, routeLoading: s.routeLoading, draftRoute: s.draftRoute,
     addRouteStop: s.addRouteStop, removeRouteStop: s.removeRouteStop, moveRouteStop: s.moveRouteStop,
+    destinationRaw: s.destinationRaw,
   })));
 
   const draftedRef = useRef(false);
@@ -33,6 +35,12 @@ export function RouteScreen() {
         <p className="mono-label" style={{ marginBottom: 6 }}>Plan the route</p>
         <h2 style={{ fontSize: 28 }}>Agent drafts stops from your answers</h2>
       </div>
+
+      <AgentMessage thinking={routeLoading}>
+        {routeLoading
+          ? `Drafting a route through ${destinationRaw} from what you told me…`
+          : `Here's the route I drafted for ${destinationRaw} — reorder, remove, or add a stop of your own.`}
+      </AgentMessage>
 
       {routeLoading ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>

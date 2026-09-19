@@ -15,11 +15,15 @@ export function OnTheRoadScreen() {
 
   const days = Array.from(new Set(items.map((i) => i.day))).sort((a, b) => a - b);
 
-  function submit() {
+  async function submit() {
     if (!prompt.trim()) return;
-    submitChangeRequest(prompt);
-    setPrompt('');
-    navigate('/booking');
+    try {
+      await submitChangeRequest(prompt);
+      setPrompt('');
+      navigate('/booking');
+    } catch {
+      // toast already shown by the store — stay put so the request can be retried
+    }
   }
 
   return (
@@ -52,7 +56,7 @@ export function OnTheRoadScreen() {
           rows={3}
           style={{ resize: 'vertical', border: '1px solid var(--border)', borderRadius: 12, padding: 12, background: 'var(--surface)', color: 'var(--text)', font: 'inherit', fontSize: 14 }}
         />
-        <button className="btn-secondary" style={{ alignSelf: 'flex-end' }} onClick={submit} disabled={!prompt.trim()}>
+        <button className="btn-secondary" style={{ alignSelf: 'flex-end' }} onClick={() => void submit()} disabled={!prompt.trim()}>
           Tell the agent
         </button>
         {changeLog.length > 0 && (

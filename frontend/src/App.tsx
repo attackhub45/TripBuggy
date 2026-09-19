@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { DestinationArtDefs } from './art/DestinationArt';
 import { AccountBar } from './components/AccountBar';
+import { ToastHost } from './components/ToastHost';
 import { getActiveTripId } from './api/client';
 import { useTripStore } from './state/tripStore';
 import { useAuthStore } from './state/authStore';
@@ -56,6 +57,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <DestinationArtDefs />
+      <ToastHost />
       <div className="app-shell">
         <div className="screen-wrap">
           <AccountBar />
