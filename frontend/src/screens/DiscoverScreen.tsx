@@ -69,7 +69,7 @@ export function DiscoverScreen() {
                   <p style={{ fontWeight: 600 }}>{s.title}</p>
                   <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>${s.cost}</p>
                 </div>
-                <button className="btn-secondary" disabled={added} onClick={() => addSuggestionToItinerary(s.id)}>
+                <button className="btn-secondary" data-testid="add-suggestion" disabled={added} onClick={() => addSuggestionToItinerary(s.id)}>
                   {added ? 'Added' : 'Add'}
                 </button>
               </div>
@@ -99,7 +99,7 @@ export function DiscoverScreen() {
           <div className="pill-input" style={{ padding: '8px 14px', width: 100 }}>
             <input value={manualCost} onChange={(e) => setManualCost(e.target.value)} placeholder="$" inputMode="numeric" />
           </div>
-          <button type="submit" className="btn-secondary">Add</button>
+          <button type="submit" className="btn-secondary" data-testid="add-manual-item">Add</button>
         </form>
       </div>
 
