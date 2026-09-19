@@ -7,9 +7,13 @@ A prioritized punch-list of what's left across the build and deployment, as of 2
 
 ---
 
-## Tier 1 — The core product gap
+## Tier 1 — The core product gap ✅ done (2026-09-19)
 
-- [ ] **Real agent (Anthropic API)** — Replace the hardcoded logic in `backend/app/agent_service.py` with real Claude tool calls for route drafting, catalog search, and booking decisions. Needs an `ANTHROPIC_API_KEY`. This is the single biggest gap between "demo" and "product" — everything else works, but the agent isn't actually intelligent yet.
+- [x] **Real agent (Anthropic API)** — `agent_service.py` now calls Claude (tool calling) for route drafting, catalog discovery, and on-the-road change-target interpretation, falling back to the old deterministic simulation on any failure. Booking's own state transitions stay deterministic on purpose — only the two content-generation tasks and the change-target pick got real reasoning.
+
+  Verified live: a Marrakech trip (not one of the app's 8 hardcoded destinations) produced a genuinely specific, on-brief route and catalog; a free-text change request correctly identified the one affected item out of six booked, confirmed via logs to be a real API call rather than the random fallback.
+
+  Two real bugs found and fixed along the way: Claude occasionally double-encodes a complex tool input as a JSON string instead of a native array (handled in `_extract_list_field`); and route/catalog generation was being given the canonicalized name from the 8-destination matcher instead of what the customer actually typed (e.g. "Kyoto, Japan" was resolving to "Tokyo") — fixed by passing the raw destination string to the real agent calls.
 
 ## Tier 2 — Product completeness ✅ done (2026-09-19)
 
