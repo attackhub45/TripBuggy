@@ -11,12 +11,14 @@ A prioritized punch-list of what's left across the build and deployment, as of 2
 
 - [ ] **Real agent (Anthropic API)** — Replace the hardcoded logic in `backend/app/agent_service.py` with real Claude tool calls for route drafting, catalog search, and booking decisions. Needs an `ANTHROPIC_API_KEY`. This is the single biggest gap between "demo" and "product" — everything else works, but the agent isn't actually intelligent yet.
 
-## Tier 2 — Product completeness
+## Tier 2 — Product completeness ✅ done (2026-09-19)
 
-- [ ] **Real login/signup** — Every browser currently gets a silent anonymous device account (see `ensureAuthenticated()` in `frontend/src/api/client.ts`). No password reset, no way to return on a different device, no visible identity.
-- [ ] **Enforce crew roles** — `owner`/`editor`/`viewer` are stored on `crew_members` but nothing checks them. A viewer can currently do everything an owner can.
-- [ ] **"My trips" list** — The backend already supports multiple trips per user; the frontend only ever tracks one trip in memory. No screen exists to browse past trips.
-- [ ] **Refresh resilience** — The active trip ID lives only in memory (not the URL or localStorage), so refreshing mid-flow loses your place even though the trip still exists in Postgres.
+- [x] **Real login/signup** — `LoginScreen`/`SignupScreen` + `authStore`. Signing in swaps the session from the silent device account to a real one.
+- [x] **Enforce crew roles** — `require_viewer`/`require_editor`/`require_owner` in `deps.py` resolve role by email match (owner or `crew_members`), no schema change needed. Verified: an editor can edit a trip they don't own; a viewer's write attempt gets a real 403.
+- [x] **"My trips" list** — `TripsListScreen` + `GET /api/v1/trips`, showing owned + crew trips with a role badge, opening straight to the right screen for that trip's status.
+- [x] **Refresh resilience** — active trip id persists to `localStorage`; `App.tsx` rehydrates it before rendering routes. Verified with a hard reload on a deep route (`/route`).
+
+**Known follow-up, not a security gap:** the frontend doesn't yet disable mutating buttons for viewers — the backend correctly rejects the write (403), but a viewer currently sees an enabled "Add" button that then fails. Cosmetic; worth a small pass later.
 
 ## Tier 3 — Polish
 
