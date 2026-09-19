@@ -17,16 +17,18 @@ export function BookingScreen() {
   const navigate = useNavigate();
   const {
     items, autonomyLevel, setAutonomy, runBooking, approveItem, bookingRunning,
-    isInternational, activeChangeRequest, resolveActiveChange,
+    isInternational, activeChangeRequest, resolveActiveChange, myRole,
   } = useTripStore(useShallow((s) => ({
     items: s.items, autonomyLevel: s.autonomyLevel, setAutonomy: s.setAutonomy,
     runBooking: s.runBooking, approveItem: s.approveItem, bookingRunning: s.bookingRunning,
     isInternational: s.isInternational, activeChangeRequest: s.activeChangeRequest, resolveActiveChange: s.resolveActiveChange,
+    myRole: s.myRole,
   })));
+  const readOnly = myRole === 'viewer';
 
   const allBooked = items.length > 0 && items.every((i) => i.status === 'simulated_booked');
   const canProceed = autonomyLevel === 'draft_only' ? items.length > 0 : allBooked;
-  const needsRun = autonomyLevel !== 'draft_only' && items.some((i) => i.status !== 'simulated_booked');
+  const needsRun = !readOnly && autonomyLevel !== 'draft_only' && items.some((i) => i.status !== 'simulated_booked');
   const runLabel = autonomyLevel === 'full_auto' ? 'Book everything' : 'Send for approval';
 
   const agentText = bookingRunning
@@ -57,7 +59,7 @@ export function BookingScreen() {
         <div className="banner info">Documents check — confirm passports/visas are valid before booking.</div>
       )}
 
-      <AutonomyDial value={autonomyLevel} onChange={setAutonomy} />
+      <AutonomyDial value={autonomyLevel} onChange={setAutonomy} disabled={readOnly} />
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {items.map((item) => (
@@ -70,7 +72,7 @@ export function BookingScreen() {
             <span className="mono-label" style={{ color: item.status === 'simulated_booked' ? 'var(--accent-2)' : 'var(--text-muted)' }}>
               {STATUS_LABEL[item.status]}
             </span>
-            {item.status === 'pending_approval' && (
+            {!readOnly && item.status === 'pending_approval' && (
               <button className="btn-secondary" onClick={() => approveItem(item.id)}>Approve</button>
             )}
           </div>

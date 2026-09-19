@@ -7,18 +7,20 @@ import { SceneCrop } from '../art/DestinationArt';
 
 export function FlowScreen() {
   const navigate = useNavigate();
-  const { answers, answeredOrder, answerQuestion, destKey } = useTripStore(useShallow((s) => ({
+  const { answers, answeredOrder, answerQuestion, destKey, myRole } = useTripStore(useShallow((s) => ({
     answers: s.answers,
     answeredOrder: s.answeredOrder,
     answerQuestion: s.answerQuestion,
     destKey: s.destKey,
+    myRole: s.myRole,
   })));
+  const readOnly = myRole === 'viewer';
 
   const step = answeredOrder.length;
   const question = QUESTIONS[step];
 
   function select(value: string) {
-    if (!question) return;
+    if (!question || readOnly) return;
     answerQuestion(question.key, value);
     if (step === QUESTIONS.length - 1) {
       navigate('/summary');
@@ -54,6 +56,7 @@ export function FlowScreen() {
               type="button"
               className={`chip${answers[question.key] === opt ? ' selected' : ''}`}
               onClick={() => select(opt)}
+              disabled={readOnly}
             >
               {opt}
             </button>

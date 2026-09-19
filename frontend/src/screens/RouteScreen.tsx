@@ -9,18 +9,21 @@ export function RouteScreen() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const {
-    routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop, destinationRaw,
+    routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop, destinationRaw, myRole,
   } = useTripStore(useShallow((s) => ({
     routeStops: s.routeStops, routeLoading: s.routeLoading, draftRoute: s.draftRoute,
     addRouteStop: s.addRouteStop, removeRouteStop: s.removeRouteStop, moveRouteStop: s.moveRouteStop,
-    destinationRaw: s.destinationRaw,
+    destinationRaw: s.destinationRaw, myRole: s.myRole,
   })));
+  const readOnly = myRole === 'viewer';
 
   const draftedRef = useRef(false);
   useEffect(() => {
     // Guards against React 18 StrictMode's double effect-invocation in dev, which would
     // otherwise fire two concurrent draftRoute() calls and leave duplicate stops behind.
-    if (draftedRef.current) return;
+    // Viewers can't trigger a draft anyway (backend 403s), so don't even try — they just
+    // see whatever an owner/editor has already drafted.
+    if (draftedRef.current || readOnly) return;
     if (routeStops.length === 0 && !routeLoading) {
       draftedRef.current = true;
       draftRoute();
@@ -57,25 +60,29 @@ export function RouteScreen() {
                 <p style={{ fontWeight: 600 }}>{stop.name}</p>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{stop.notes}</p>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move up" disabled={i === 0} onClick={() => moveRouteStop(stop.id, -1)}>↑</button>
-                <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move down" disabled={i === routeStops.length - 1} onClick={() => moveRouteStop(stop.id, 1)}>↓</button>
-                <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Remove" onClick={() => removeRouteStop(stop.id)}>×</button>
-              </div>
+              {!readOnly && (
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move up" disabled={i === 0} onClick={() => moveRouteStop(stop.id, -1)}>↑</button>
+                  <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move down" disabled={i === routeStops.length - 1} onClick={() => moveRouteStop(stop.id, 1)}>↓</button>
+                  <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Remove" onClick={() => removeRouteStop(stop.id)}>×</button>
+                </div>
+              )}
             </div>
           ))}
         </div>
       )}
 
-      <form
-        style={{ display: 'flex', gap: 10 }}
-        onSubmit={(e) => { e.preventDefault(); addRouteStop(draft); setDraft(''); }}
-      >
-        <div className="pill-input" style={{ padding: '9px 16px' }}>
-          <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a stop of your own" />
-        </div>
-        <button type="submit" className="btn-secondary">Add</button>
-      </form>
+      {!readOnly && (
+        <form
+          style={{ display: 'flex', gap: 10 }}
+          onSubmit={(e) => { e.preventDefault(); addRouteStop(draft); setDraft(''); }}
+        >
+          <div className="pill-input" style={{ padding: '9px 16px' }}>
+            <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Add a stop of your own" />
+          </div>
+          <button type="submit" className="btn-secondary">Add</button>
+        </form>
+      )}
 
       <button className="btn-primary" style={{ alignSelf: 'center' }} disabled={routeLoading || routeStops.length === 0} onClick={() => navigate('/discover')}>
         Discover options

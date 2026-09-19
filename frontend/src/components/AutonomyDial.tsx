@@ -6,7 +6,7 @@ const STOPS: { level: AutonomyLevel; label: string; blurb: string }[] = [
   { level: 'full_auto', label: 'Full auto', blurb: 'Agent books without asking first' },
 ];
 
-export function AutonomyDial({ value, onChange }: { value: AutonomyLevel; onChange: (v: AutonomyLevel) => void }) {
+export function AutonomyDial({ value, onChange, disabled }: { value: AutonomyLevel; onChange: (v: AutonomyLevel) => void; disabled?: boolean }) {
   const activeIndex = STOPS.findIndex((s) => s.level === value);
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -30,10 +30,12 @@ export function AutonomyDial({ value, onChange }: { value: AutonomyLevel; onChan
               key={s.level}
               type="button"
               onClick={() => onChange(s.level)}
+              disabled={disabled}
               aria-pressed={value === s.level}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
-                background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+                background: 'none', border: 'none', cursor: disabled ? 'default' : 'pointer', padding: 4,
+                opacity: disabled ? 0.6 : 1,
               }}
             >
               <span

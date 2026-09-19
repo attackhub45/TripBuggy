@@ -9,9 +9,11 @@ const TYPE_LABEL = { flight: 'Flight', stay: 'Stay', activity: 'Activity' };
 export function OnTheRoadScreen() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
-  const { items, submitChangeRequest, changeLog, completeTrip } = useTripStore(useShallow((s) => ({
+  const { items, submitChangeRequest, changeLog, completeTrip, myRole } = useTripStore(useShallow((s) => ({
     items: s.items, submitChangeRequest: s.submitChangeRequest, changeLog: s.changeLog, completeTrip: s.completeTrip,
+    myRole: s.myRole,
   })));
+  const readOnly = myRole === 'viewer';
 
   const days = Array.from(new Set(items.map((i) => i.day))).sort((a, b) => a - b);
 
@@ -48,17 +50,21 @@ export function OnTheRoadScreen() {
       ))}
 
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <p className="mono-label">Need something changed?</p>
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          placeholder="e.g. my flight got delayed 4 hours, I'll miss the evening activity"
-          rows={3}
-          style={{ resize: 'vertical', border: '1px solid var(--border)', borderRadius: 12, padding: 12, background: 'var(--surface)', color: 'var(--text)', font: 'inherit', fontSize: 14 }}
-        />
-        <button className="btn-secondary" style={{ alignSelf: 'flex-end' }} onClick={() => void submit()} disabled={!prompt.trim()}>
-          Tell the agent
-        </button>
+        {!readOnly && (
+          <>
+            <p className="mono-label">Need something changed?</p>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g. my flight got delayed 4 hours, I'll miss the evening activity"
+              rows={3}
+              style={{ resize: 'vertical', border: '1px solid var(--border)', borderRadius: 12, padding: 12, background: 'var(--surface)', color: 'var(--text)', font: 'inherit', fontSize: 14 }}
+            />
+            <button className="btn-secondary" style={{ alignSelf: 'flex-end' }} onClick={() => void submit()} disabled={!prompt.trim()}>
+              Tell the agent
+            </button>
+          </>
+        )}
         {changeLog.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4 }}>
             <p className="mono-label">Past requests</p>
@@ -67,9 +73,11 @@ export function OnTheRoadScreen() {
         )}
       </div>
 
-      <button className="btn-primary" style={{ alignSelf: 'center' }} onClick={() => { void completeTrip().then(() => navigate('/recap')); }}>
-        End trip
-      </button>
+      {!readOnly && (
+        <button className="btn-primary" style={{ alignSelf: 'center' }} onClick={() => { void completeTrip().then(() => navigate('/recap')); }}>
+          End trip
+        </button>
+      )}
     </div>
   );
 }

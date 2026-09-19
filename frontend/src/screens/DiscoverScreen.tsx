@@ -17,17 +17,19 @@ export function DiscoverScreen() {
   const [manualCost, setManualCost] = useState('');
 
   const {
-    suggestions, discoverLoading, discoverOptions, items, addSuggestionToItinerary, addManualItem, destinationRaw,
+    suggestions, discoverLoading, discoverOptions, items, addSuggestionToItinerary, addManualItem, destinationRaw, myRole,
   } = useTripStore(useShallow((s) => ({
     suggestions: s.suggestions, discoverLoading: s.discoverLoading, discoverOptions: s.discoverOptions,
     items: s.items, addSuggestionToItinerary: s.addSuggestionToItinerary, addManualItem: s.addManualItem,
-    destinationRaw: s.destinationRaw,
+    destinationRaw: s.destinationRaw, myRole: s.myRole,
   })));
+  const readOnly = myRole === 'viewer';
 
   const discoveredRef = useRef(false);
   useEffect(() => {
     // Same StrictMode double-invocation guard as RouteScreen — see the comment there.
-    if (discoveredRef.current) return;
+    // Viewers can't trigger this either (backend 403s) — see RouteScreen for the same call.
+    if (discoveredRef.current || readOnly) return;
     if (suggestions.length === 0 && !discoverLoading) {
       discoveredRef.current = true;
       discoverOptions();
@@ -69,39 +71,43 @@ export function DiscoverScreen() {
                   <p style={{ fontWeight: 600 }}>{s.title}</p>
                   <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>${s.cost}</p>
                 </div>
-                <button className="btn-secondary" data-testid="add-suggestion" disabled={added} onClick={() => addSuggestionToItinerary(s.id)}>
-                  {added ? 'Added' : 'Add'}
-                </button>
+                {!readOnly && (
+                  <button className="btn-secondary" data-testid="add-suggestion" disabled={added} onClick={() => addSuggestionToItinerary(s.id)}>
+                    {added ? 'Added' : 'Add'}
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <p className="mono-label">Manual entry <span style={{ textTransform: 'none', letterSpacing: 0 }}>— optional, for when you're offline or the agent has nothing to suggest</span></p>
-        <form
-          style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}
-          onSubmit={(e) => {
-            e.preventDefault();
-            addManualItem(manualTitle, manualType, Number(manualCost) || 0);
-            setManualTitle(''); setManualCost('');
-          }}
-        >
-          <div className="pill-input" style={{ padding: '8px 14px', flex: '1 1 200px' }}>
-            <input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} placeholder="What is it?" />
-          </div>
-          <select value={manualType} onChange={(e) => setManualType(e.target.value as ItemType)} style={{ borderRadius: 999, border: '1px solid var(--border)', padding: '0 12px', background: 'var(--surface)', color: 'var(--text)' }}>
-            <option value="flight">Flight</option>
-            <option value="stay">Stay</option>
-            <option value="activity">Activity</option>
-          </select>
-          <div className="pill-input" style={{ padding: '8px 14px', width: 100 }}>
-            <input value={manualCost} onChange={(e) => setManualCost(e.target.value)} placeholder="$" inputMode="numeric" />
-          </div>
-          <button type="submit" className="btn-secondary" data-testid="add-manual-item">Add</button>
-        </form>
-      </div>
+      {!readOnly && (
+        <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p className="mono-label">Manual entry <span style={{ textTransform: 'none', letterSpacing: 0 }}>— optional, for when you're offline or the agent has nothing to suggest</span></p>
+          <form
+            style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}
+            onSubmit={(e) => {
+              e.preventDefault();
+              addManualItem(manualTitle, manualType, Number(manualCost) || 0);
+              setManualTitle(''); setManualCost('');
+            }}
+          >
+            <div className="pill-input" style={{ padding: '8px 14px', flex: '1 1 200px' }}>
+              <input value={manualTitle} onChange={(e) => setManualTitle(e.target.value)} placeholder="What is it?" />
+            </div>
+            <select value={manualType} onChange={(e) => setManualType(e.target.value as ItemType)} style={{ borderRadius: 999, border: '1px solid var(--border)', padding: '0 12px', background: 'var(--surface)', color: 'var(--text)' }}>
+              <option value="flight">Flight</option>
+              <option value="stay">Stay</option>
+              <option value="activity">Activity</option>
+            </select>
+            <div className="pill-input" style={{ padding: '8px 14px', width: 100 }}>
+              <input value={manualCost} onChange={(e) => setManualCost(e.target.value)} placeholder="$" inputMode="numeric" />
+            </div>
+            <button type="submit" className="btn-secondary" data-testid="add-manual-item">Add</button>
+          </form>
+        </div>
+      )}
 
       <button className="btn-primary" style={{ alignSelf: 'center' }} disabled={items.length === 0} onClick={() => navigate('/itinerary')}>
         Build itinerary

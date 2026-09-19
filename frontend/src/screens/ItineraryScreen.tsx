@@ -10,12 +10,13 @@ const TYPE_LABEL = { flight: 'Flight', stay: 'Stay', activity: 'Activity' };
 export function ItineraryScreen() {
   const navigate = useNavigate();
   const {
-    items, removeItem, setItemSlot, budgetCap, budgetTotal, isOverBudget, hasConflicts, tripDays,
+    items, removeItem, setItemSlot, budgetCap, budgetTotal, isOverBudget, hasConflicts, tripDays, myRole,
   } = useTripStore(useShallow((s) => ({
     items: s.items, removeItem: s.removeItem, setItemSlot: s.setItemSlot,
     budgetCap: s.budgetCap, budgetTotal: s.budgetTotal, isOverBudget: s.isOverBudget, hasConflicts: s.hasConflicts,
-    tripDays: s.days,
+    tripDays: s.days, myRole: s.myRole,
   })));
+  const readOnly = myRole === 'viewer';
   const dayOptions = Array.from({ length: tripDays ?? 1 }, (_, i) => i + 1);
 
   const total = budgetTotal();
@@ -72,6 +73,7 @@ export function ItineraryScreen() {
                 <select
                   value={item.day}
                   onChange={(e) => setItemSlot(item.id, Number(e.target.value), item.slot)}
+                  disabled={readOnly}
                   style={{ borderRadius: 999, border: '1px solid var(--border)', padding: '6px 10px', background: 'var(--surface)', color: 'var(--text)' }}
                 >
                   {dayOptions.map((d) => <option key={d} value={d}>Day {d}</option>)}
@@ -79,11 +81,12 @@ export function ItineraryScreen() {
                 <select
                   value={item.slot}
                   onChange={(e) => setItemSlot(item.id, item.day, e.target.value as Slot)}
+                  disabled={readOnly}
                   style={{ borderRadius: 999, border: '1px solid var(--border)', padding: '6px 10px', background: 'var(--surface)', color: 'var(--text)' }}
                 >
                   {SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
-                <button className="icon-btn" aria-label="Remove" onClick={() => removeItem(item.id)}>×</button>
+                {!readOnly && <button className="icon-btn" aria-label="Remove" onClick={() => removeItem(item.id)}>×</button>}
               </div>
             );
           })}
