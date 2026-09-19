@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import agent_service, models, schemas
-from ..deps import get_current_user, get_db, get_owned_trip
+from ..deps import get_current_user, get_db, get_trip_role, require_editor, require_owner, require_viewer
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 
@@ -19,6 +19,24 @@ def _resolve_change_requests_if_clear(trip: models.Trip) -> None:
     for cr in trip.change_requests:
         if not cr.resolved:
             cr.resolved = True
+
+
+@router.get("", response_model=list[schemas.TripSummaryOut])
+def list_trips(db: Session = Depends(get_db), user: models.User = Depends(get_current_user)):
+    """Trips you own, plus trips you're a crew member on (matched by email)."""
+    owned = db.query(models.Trip).filter(models.Trip.user_id == user.id).all()
+    crew_trip_ids = {
+        c.trip_id for c in db.query(models.CrewMember).filter(models.CrewMember.email.ilike(user.email)).all()
+    }
+    crew_trip_ids -= {t.id for t in owned}
+    crewed = db.query(models.Trip).filter(models.Trip.id.in_(crew_trip_ids)).all() if crew_trip_ids else []
+
+    results = []
+    for trip in owned + crewed:
+        trip.my_role = get_trip_role(trip, user)
+        results.append(trip)
+    results.sort(key=lambda t: t.created_at, reverse=True)
+    return results
 
 
 @router.post("", response_model=schemas.TripOut, status_code=status.HTTP_201_CREATED)
@@ -39,7 +57,7 @@ def create_trip(
 
 
 @router.get("/{trip_id}", response_model=schemas.TripOut)
-def get_trip(trip: models.Trip = Depends(get_owned_trip)):
+def get_trip(trip: models.Trip = Depends(require_viewer)):
     return trip
 
 
@@ -47,7 +65,7 @@ def get_trip(trip: models.Trip = Depends(get_owned_trip)):
 def submit_intake_answer(
     trip_id: UUID,
     payload: schemas.IntakeAnswerRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     if payload.question_key not in QUESTION_KEYS:
@@ -62,7 +80,7 @@ def submit_intake_answer(
 def set_international(
     trip_id: UUID,
     payload: schemas.InternationalUpdateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     trip.is_international = payload.is_international
@@ -75,7 +93,7 @@ def set_international(
 def set_trip_details(
     trip_id: UUID,
     payload: schemas.TripDetailsUpdateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     if payload.days < 1:
@@ -91,7 +109,7 @@ def set_trip_details(
 def add_crew(
     trip_id: UUID,
     payload: schemas.CrewCreateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_owner),
     db: Session = Depends(get_db),
 ):
     db.add(models.CrewMember(trip_id=trip.id, email=payload.email, role=payload.role))
@@ -101,7 +119,7 @@ def add_crew(
 
 
 @router.post("/{trip_id}/route", response_model=schemas.TripOut)
-def draft_route(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: Session = Depends(get_db)):
+def draft_route(trip_id: UUID, trip: models.Trip = Depends(require_editor), db: Session = Depends(get_db)):
     """Agent Intake -> Plan the Route. See agent_service.draft_route_stops for the simulation seam."""
     if trip.days is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Set the trip length (days) before drafting a route")
@@ -121,7 +139,7 @@ def draft_route(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: 
 def add_route_stop(
     trip_id: UUID,
     payload: schemas.RouteStopCreateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     db.add(models.RouteStop(trip_id=trip.id, order_index=len(trip.route_stops), name=payload.name, notes=payload.notes))
@@ -135,7 +153,7 @@ def move_route_stop(
     trip_id: UUID,
     stop_id: UUID,
     payload: schemas.RouteStopMoveRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     stops = sorted(trip.route_stops, key=lambda s: s.order_index)
@@ -152,7 +170,7 @@ def move_route_stop(
 def remove_route_stop(
     trip_id: UUID,
     stop_id: UUID,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     stop = db.get(models.RouteStop, stop_id)
@@ -165,7 +183,7 @@ def remove_route_stop(
 
 
 @router.post("/{trip_id}/discover", response_model=list[schemas.DiscoverySuggestion])
-def discover_options(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip)):
+def discover_options(trip_id: UUID, trip: models.Trip = Depends(require_editor)):
     """Discover & Add. See agent_service.discover_catalog for the real-search-API seam."""
     return agent_service.discover_catalog(trip.destination_key, trip.destination_raw)
 
@@ -174,7 +192,7 @@ def discover_options(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip))
 def add_itinerary_item(
     trip_id: UUID,
     payload: schemas.ItineraryItemCreateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     day, slot = agent_service.next_day_slot(len(trip.items), trip.days or 3)
@@ -197,7 +215,7 @@ def update_itinerary_item(
     trip_id: UUID,
     item_id: UUID,
     payload: schemas.ItineraryItemUpdateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     item = db.get(models.ItineraryItem, item_id)
@@ -220,7 +238,7 @@ def update_itinerary_item(
 def remove_itinerary_item(
     trip_id: UUID,
     item_id: UUID,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     item = db.get(models.ItineraryItem, item_id)
@@ -233,7 +251,7 @@ def remove_itinerary_item(
 
 
 @router.get("/{trip_id}/budget", response_model=schemas.BudgetOut)
-def get_budget(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip)):
+def get_budget(trip_id: UUID, trip: models.Trip = Depends(require_editor)):
     total = sum(i.cost_estimate for i in trip.items)
     cap = agent_service.budget_cap_for(trip.budget_answer)
     return schemas.BudgetOut(total=total, cap=cap, over_budget=total > cap)
@@ -243,7 +261,7 @@ def get_budget(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip)):
 def set_autonomy(
     trip_id: UUID,
     payload: schemas.AutonomyUpdateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     if payload.autonomy_level not in AUTONOMY_LEVELS:
@@ -255,7 +273,7 @@ def set_autonomy(
 
 
 @router.post("/{trip_id}/book", response_model=schemas.TripOut)
-def run_booking(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: Session = Depends(get_db)):
+def run_booking(trip_id: UUID, trip: models.Trip = Depends(require_editor), db: Session = Depends(get_db)):
     """Agentic Booking — the autonomy dial. See agent_service module docstring for the real-vendor seam."""
     trip.status = "booking"
     if trip.autonomy_level == "full_auto":
@@ -278,7 +296,7 @@ def run_booking(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: 
 def approve_item(
     trip_id: UUID,
     item_id: UUID,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     item = db.get(models.ItineraryItem, item_id)
@@ -296,7 +314,7 @@ def approve_item(
 def submit_change_request(
     trip_id: UUID,
     payload: schemas.ChangeRequestCreateRequest,
-    trip: models.Trip = Depends(get_owned_trip),
+    trip: models.Trip = Depends(require_editor),
     db: Session = Depends(get_db),
 ):
     """On the Road -> loops back into Agentic Booking. See BRD.md 'On the Road' stage."""
@@ -316,7 +334,7 @@ def submit_change_request(
 
 
 @router.post("/{trip_id}/complete", response_model=schemas.TripOut)
-def complete_trip(trip_id: UUID, trip: models.Trip = Depends(get_owned_trip), db: Session = Depends(get_db)):
+def complete_trip(trip_id: UUID, trip: models.Trip = Depends(require_editor), db: Session = Depends(get_db)):
     trip.status = "complete"
     db.commit()
     db.refresh(trip)

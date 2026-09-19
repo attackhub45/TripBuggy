@@ -13,12 +13,13 @@ export function SummaryScreen() {
   const [continuing, setContinuing] = useState(false);
   const {
     destinationRaw, destKey, answers, crew, addCrew, isInternational, setInternational,
-    days, specialRequests, setTripDetails,
+    days, specialRequests, setTripDetails, myRole,
   } = useTripStore(useShallow((s) => ({
     destinationRaw: s.destinationRaw, destKey: s.destKey, answers: s.answers,
     crew: s.crew, addCrew: s.addCrew, isInternational: s.isInternational, setInternational: s.setInternational,
-    days: s.days, specialRequests: s.specialRequests, setTripDetails: s.setTripDetails,
+    days: s.days, specialRequests: s.specialRequests, setTripDetails: s.setTripDetails, myRole: s.myRole,
   })));
+  const isOwner = myRole === 'owner';
   const [daysInput, setDaysInput] = useState(days ? String(days) : '');
   const [requestsInput, setRequestsInput] = useState(specialRequests);
 
@@ -57,15 +58,19 @@ export function SummaryScreen() {
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <p className="mono-label">Invite crew</p>
           <p style={{ fontSize: 14, color: 'var(--text-muted)' }}>Solo and group trips share the same planning engine — this just adds who else can see or edit the trip.</p>
-          <form
-            style={{ display: 'flex', gap: 10 }}
-            onSubmit={(e) => { e.preventDefault(); addCrew(email, 'editor'); setEmail(''); }}
-          >
-            <div className="pill-input" style={{ padding: '9px 16px' }}>
-              <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="friend@email.com" type="email" />
-            </div>
-            <button type="submit" className="btn-secondary">Add</button>
-          </form>
+          {isOwner ? (
+            <form
+              style={{ display: 'flex', gap: 10 }}
+              onSubmit={(e) => { e.preventDefault(); addCrew(email, 'editor'); setEmail(''); }}
+            >
+              <div className="pill-input" style={{ padding: '9px 16px' }}>
+                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="friend@email.com" type="email" />
+              </div>
+              <button type="submit" className="btn-secondary">Add</button>
+            </form>
+          ) : (
+            <p className="mono-label" style={{ textTransform: 'none', letterSpacing: 0 }}>Only the trip owner can invite crew.</p>
+          )}
           {crew.length > 0 && (
             <div className="chips">
               {crew.map((c) => <span key={c.id} className="tag">{c.email} · {c.role}</span>)}

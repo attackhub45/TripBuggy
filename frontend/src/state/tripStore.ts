@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { matchDestination, type DestinationKey } from '../art/DestinationArt';
-import { api, ensureAuthenticated, AuthError, type ApiTrip } from '../api/client';
+import { api, ensureAuthenticated, setActiveTripId, AuthError, type ApiTrip } from '../api/client';
 import type {
   IntakeAnswers, RouteStop, ItineraryItem, CrewMember, ChangeRequest,
   AutonomyLevel, ItemType, ItemStatus, Slot,
@@ -28,6 +28,8 @@ const QUESTION_ORDER: (keyof IntakeAnswers)[] = ['when', 'who', 'budget', 'pace'
 
 interface TripState {
   tripId: string | null;
+  myRole: 'owner' | 'editor' | 'viewer';
+  loadingTrip: boolean;
 
   // intake
   destinationRaw: string;
@@ -57,6 +59,7 @@ interface TripState {
   changeLog: ChangeRequest[];
 
   // actions
+  loadTrip: (tripId: string) => Promise<void>;
   startTrip: (raw: string) => Promise<void>;
   answerQuestion: (key: keyof IntakeAnswers, value: string) => Promise<void>;
   addCrew: (email: string, role: CrewMember['role']) => Promise<void>;
@@ -92,6 +95,8 @@ interface TripState {
 
 const initialState = {
   tripId: null as string | null,
+  myRole: 'owner' as 'owner' | 'editor' | 'viewer',
+  loadingTrip: false,
 
   destinationRaw: '',
   destKey: 'fallback' as DestinationKey,
@@ -135,6 +140,7 @@ function mapTrip(trip: ApiTrip) {
 
   return {
     tripId: trip.id,
+    myRole: trip.my_role as 'owner' | 'editor' | 'viewer',
     destinationRaw: trip.destination_raw,
     destKey: trip.destination_key as DestinationKey,
     answers,
@@ -168,8 +174,26 @@ function mapTrip(trip: ApiTrip) {
   };
 }
 
+/** mapTrip, plus persisting which trip is "active" so a refresh can reload it — see loadTrip below. */
+function applyTrip(trip: ApiTrip) {
+  setActiveTripId(trip.id);
+  return mapTrip(trip);
+}
+
 export const useTripStore = create<TripState>((set, get) => ({
   ...initialState,
+
+  loadTrip: async (tripId) => {
+    set({ loadingTrip: true });
+    try {
+      const trip = await api.getTrip(tripId);
+      set({ ...applyTrip(trip), loadingTrip: false });
+    } catch (err) {
+      setActiveTripId(null);
+      set({ loadingTrip: false });
+      throw err;
+    }
+  },
 
   startTrip: async (raw) => {
     set({ ...initialState, destinationRaw: raw });
@@ -184,35 +208,35 @@ export const useTripStore = create<TripState>((set, get) => ({
       await ensureAuthenticated();
       trip = await api.createTrip(raw);
     }
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   answerQuestion: async (key, value) => {
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.submitIntakeAnswer(tripId, key, value);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   addCrew: async (email, role) => {
     const { tripId } = get();
     if (!tripId || !email.trim()) return;
     const trip = await api.addCrew(tripId, email.trim(), role);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   setInternational: async (v) => {
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.setInternational(tripId, v);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   setTripDetails: async (days, specialRequests) => {
     const { tripId } = get();
     if (!tripId || days < 1) return;
     const trip = await api.setTripDetails(tripId, days, specialRequests);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   draftRoute: async () => {
@@ -221,7 +245,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     set({ routeLoading: true });
     try {
       const trip = await api.draftRoute(tripId);
-      set({ ...mapTrip(trip), routeLoading: false });
+      set({ ...applyTrip(trip), routeLoading: false });
     } catch (err) {
       set({ routeLoading: false });
       throw err;
@@ -232,21 +256,21 @@ export const useTripStore = create<TripState>((set, get) => ({
     const { tripId } = get();
     if (!tripId || !name.trim()) return;
     const trip = await api.addRouteStop(tripId, name.trim());
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   removeRouteStop: async (id) => {
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.removeRouteStop(tripId, id);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   moveRouteStop: async (id, dir) => {
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.moveRouteStop(tripId, id, dir);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   discoverOptions: async () => {
@@ -278,28 +302,28 @@ export const useTripStore = create<TripState>((set, get) => ({
     const s = suggestions.find((x) => x.id === suggestionId);
     if (!s) return;
     const trip = await api.addItineraryItem(tripId, s.type, s.title, s.cost, 'agent');
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   addManualItem: async (title, type, cost) => {
     const { tripId } = get();
     if (!tripId || !title.trim()) return;
     const trip = await api.addItineraryItem(tripId, type, title.trim(), cost, 'manual');
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   removeItem: async (id) => {
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.removeItineraryItem(tripId, id);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   setItemSlot: async (id, day, slot) => {
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.updateItineraryItem(tripId, id, { day_index: day, slot });
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   budgetCap: () => BUDGET_CAPS[get().answers.budget ?? ''] ?? 2800,
@@ -320,7 +344,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.setAutonomy(tripId, level);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   runBooking: async () => {
@@ -329,7 +353,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     set({ bookingRunning: true });
     try {
       const trip = await api.runBooking(tripId);
-      set({ ...mapTrip(trip), bookingRunning: false });
+      set({ ...applyTrip(trip), bookingRunning: false });
     } catch (err) {
       set({ bookingRunning: false });
       throw err;
@@ -340,14 +364,14 @@ export const useTripStore = create<TripState>((set, get) => ({
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.approveItem(tripId, id);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   submitChangeRequest: async (text) => {
     const { tripId } = get();
     if (!tripId || !text.trim()) return;
     const trip = await api.submitChangeRequest(tripId, text.trim());
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
   resolveActiveChange: () => set({ activeChangeRequest: null }),
@@ -356,8 +380,11 @@ export const useTripStore = create<TripState>((set, get) => ({
     const { tripId } = get();
     if (!tripId) return;
     const trip = await api.completeTrip(tripId);
-    set(mapTrip(trip));
+    set(applyTrip(trip));
   },
 
-  reset: () => set({ ...initialState }),
+  reset: () => {
+    setActiveTripId(null);
+    set({ ...initialState });
+  },
 }));

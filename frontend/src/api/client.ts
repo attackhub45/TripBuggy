@@ -1,5 +1,15 @@
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 const TOKEN_KEY = 'tripbuggy_token';
+const ACTIVE_TRIP_KEY = 'tripbuggy_active_trip';
+
+export function getActiveTripId(): string | null {
+  return localStorage.getItem(ACTIVE_TRIP_KEY);
+}
+
+export function setActiveTripId(tripId: string | null): void {
+  if (tripId) localStorage.setItem(ACTIVE_TRIP_KEY, tripId);
+  else localStorage.removeItem(ACTIVE_TRIP_KEY);
+}
 
 let cachedToken: string | null = null;
 
@@ -45,11 +55,44 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+export function isAuthenticated(): boolean {
+  return !!getToken();
+}
+
+export function logout(): void {
+  clearToken();
+  localStorage.removeItem(ACTIVE_TRIP_KEY);
+}
+
+export interface ApiUser { id: string; email: string; display_name: string | null }
+
+export const auth = {
+  me: () => request<ApiUser>('/api/v1/auth/me'),
+
+  async signup(email: string, password: string, displayName?: string): Promise<ApiUser> {
+    const { access_token } = await request<{ access_token: string }>('/api/v1/auth/signup', {
+      method: 'POST',
+      body: JSON.stringify({ email, password, display_name: displayName || null }),
+    });
+    setToken(access_token);
+    return auth.me();
+  },
+
+  async login(email: string, password: string): Promise<ApiUser> {
+    const { access_token } = await request<{ access_token: string }>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    });
+    setToken(access_token);
+    return auth.me();
+  },
+};
+
 /**
- * There's no login/signup screen yet (see docs/TRD.md — real auth is a follow-up).
- * Until then, each browser gets a silent, persistent device account created on first
- * use, so trips still save across sessions without putting a form in front of the
- * one-input intake the BRD calls for.
+ * Until the customer chooses to sign in or create a real account, each browser gets a
+ * silent, persistent device account, so trips still save across sessions without putting
+ * a form in front of the one-input intake the BRD calls for. Calling auth.login/signup
+ * later just replaces this token with a real one — see AuthContext.
  */
 export async function ensureAuthenticated(): Promise<void> {
   if (getToken()) return;
@@ -57,13 +100,7 @@ export async function ensureAuthenticated(): Promise<void> {
   const email = `device-${deviceId}@tripbuggy-device.com`;
   const password = deviceId;
   try {
-    const { access_token } = await request<{ access_token: string }>('/api/v1/auth/signup', {
-      method: 'POST',
-      body: JSON.stringify({ email, password }),
-    });
-    setToken(access_token);
-    localStorage.setItem('tripbuggy_device_email', email);
-    localStorage.setItem('tripbuggy_device_password', password);
+    await auth.signup(email, password);
   } catch (err) {
     throw new Error(`Could not create a session with the backend at ${BASE_URL}: ${(err as Error).message}`);
   }
@@ -85,12 +122,19 @@ export interface ApiTrip {
   when_answer: string | null; who_answer: string | null; budget_answer: string | null; pace_answer: string | null;
   is_international: boolean; autonomy_level: string;
   days: number | null; special_requests: string | null;
+  my_role: string;
   crew: ApiCrewMember[]; route_stops: ApiRouteStop[]; items: ApiItineraryItem[]; change_requests: ApiChangeRequest[];
+}
+export interface ApiTripSummary {
+  id: string; destination_raw: string; destination_key: string; status: string;
+  days: number | null; my_role: string; created_at: string;
 }
 export interface ApiDiscoverySuggestion { item_type: string; title: string; cost_estimate: number }
 export interface ApiBudget { total: number; cap: number; over_budget: boolean }
 
 export const api = {
+  listTrips: () => request<ApiTripSummary[]>('/api/v1/trips'),
+
   createTrip: (destination: string) =>
     request<ApiTrip>('/api/v1/trips', { method: 'POST', body: JSON.stringify({ destination }) }),
 

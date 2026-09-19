@@ -11,6 +11,13 @@ class SignupRequest(BaseModel):
     display_name: Optional[str] = None
 
 
+class UserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: str
+    display_name: Optional[str]
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
@@ -137,7 +144,19 @@ class TripOut(BaseModel):
     autonomy_level: str
     days: Optional[int]
     special_requests: Optional[str]
+    my_role: str = "owner"
     crew: List[CrewOut] = []
     route_stops: List[RouteStopOut] = []
     items: List[ItineraryItemOut] = []
     change_requests: List[ChangeRequestOut] = []
+
+
+class TripSummaryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    destination_raw: str
+    destination_key: str
+    status: str
+    days: Optional[int]
+    my_role: str
+    created_at: datetime
