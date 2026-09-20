@@ -26,6 +26,10 @@ export interface ItineraryItem {
   status: ItemStatus;
   source: 'agent' | 'manual';
   autonomyAtBooking?: AutonomyLevel;
+  /** Only meaningful on a not-yet-added Discover suggestion — a real search-results
+   * link on the platform the agent picked (momondo, airbnb, etc.), if it found one. */
+  platform?: string;
+  bookingUrl?: string;
 }
 
 export interface CrewMember {

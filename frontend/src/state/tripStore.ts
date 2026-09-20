@@ -326,6 +326,8 @@ export const useTripStore = create<TripState>((set, get) => ({
         slot: 'morning',
         status: 'proposed',
         source: 'agent',
+        platform: s.platform ?? undefined,
+        bookingUrl: s.booking_url ?? undefined,
       }));
       set({ suggestions, discoverLoading: false });
     } catch (err) {

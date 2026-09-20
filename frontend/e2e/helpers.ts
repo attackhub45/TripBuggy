@@ -32,9 +32,12 @@ export async function waitForRouteDraft(page: Page) {
   await expect(page.getByRole('button', { name: 'Discover options' })).toBeEnabled({ timeout: 30_000 });
 }
 
-/** From Route: continues to Discover and waits for the agent's suggested options. */
+/** From Route: continues to Discover and waits for the agent's suggested options. Real
+ * discovery now does live web search per item (see agent_service.py), which can take
+ * well over a minute against a real API key — CI's simulated fallback (no key) is much
+ * faster, but the timeout has to cover the slower real-agent case too. */
 export async function goToDiscoverAndWait(page: Page) {
   await page.getByRole('button', { name: 'Discover options' }).click();
   await expect(page).toHaveURL(/\/discover$/);
-  await expect(page.getByTestId('add-suggestion').first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('add-suggestion').first()).toBeVisible({ timeout: 150_000 });
 }

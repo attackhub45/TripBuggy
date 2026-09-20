@@ -129,7 +129,10 @@ export interface ApiTripSummary {
   id: string; destination_raw: string; destination_key: string; status: string;
   days: number | null; my_role: string; created_at: string;
 }
-export interface ApiDiscoverySuggestion { item_type: string; title: string; cost_estimate: number }
+export interface ApiDiscoverySuggestion {
+  item_type: string; title: string; cost_estimate: number;
+  platform: string | null; booking_url: string | null;
+}
 export interface ApiBudget { total: number; cap: number; over_budget: boolean }
 
 export const api = {

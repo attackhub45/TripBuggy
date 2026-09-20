@@ -69,7 +69,17 @@ export function DiscoverScreen() {
                 <span className="tag">{TYPE_LABEL[s.type]}</span>
                 <div style={{ flex: 1 }}>
                   <p style={{ fontWeight: 600 }}>{s.title}</p>
-                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>${s.cost}</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                    ${s.cost}
+                    {s.bookingUrl && (
+                      <>
+                        {' · '}
+                        <a href={s.bookingUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
+                          View on {s.platform ?? 'partner site'} ↗
+                        </a>
+                      </>
+                    )}
+                  </p>
                 </div>
                 {!readOnly && (
                   <button className="btn-secondary" data-testid="add-suggestion" disabled={added} onClick={() => addSuggestionToItinerary(s.id)}>

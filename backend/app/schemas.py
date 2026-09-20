@@ -128,6 +128,8 @@ class DiscoverySuggestion(BaseModel):
     item_type: str
     title: str
     cost_estimate: float
+    platform: Optional[str] = None
+    booking_url: Optional[str] = None
 
 
 class TripOut(BaseModel):

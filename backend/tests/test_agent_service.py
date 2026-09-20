@@ -86,6 +86,38 @@ def test_discover_catalog_falls_back_to_six_simulated_items():
     options = svc.discover_catalog("tokyo", "Tokyo")
     assert len(options) == 6
     assert options[0]["item_type"] == "flight"
+    assert options[0]["booking_url"] is None  # simulated flights don't get a link
+
+
+def test_discover_catalog_simulated_stay_gets_an_airbnb_link():
+    options = svc.discover_catalog("tokyo", "Tokyo")
+    stay = next(o for o in options if o["item_type"] == "stay")
+    assert stay["platform"] == "airbnb"
+    assert stay["booking_url"] == "https://www.airbnb.com/s/Tokyo/homes"
+
+
+# ---------------------------------------------------------------------------
+# Booking-link validation — never surface an unvalidated model-generated URL
+# ---------------------------------------------------------------------------
+
+def test_validate_booking_url_allows_a_known_domain():
+    url = "https://www.airbnb.com/s/Bangalore/homes"
+    assert svc._validate_booking_url(url) == url
+
+
+def test_validate_booking_url_rejects_an_unknown_domain():
+    assert svc._validate_booking_url("https://www.yelp.com/search?find=Bangalore") is None
+
+
+def test_validate_booking_url_rejects_non_https():
+    assert svc._validate_booking_url("http://www.airbnb.com/s/Bangalore/homes") is None
+
+
+def test_validate_booking_url_rejects_garbage():
+    assert svc._validate_booking_url(None) is None
+    assert svc._validate_booking_url(123) is None
+    assert svc._validate_booking_url("") is None
+    assert svc._validate_booking_url("not a url at all") is None
 
 
 def test_interpret_change_request_with_no_booked_items_returns_none():
@@ -110,8 +142,9 @@ class _FakeToolUseBlock:
 
 
 class _FakeResponse:
-    def __init__(self, content):
+    def __init__(self, content, stop_reason="end_turn"):
         self.content = content
+        self.stop_reason = stop_reason
 
 
 class _FakeMessages:
@@ -125,6 +158,29 @@ class _FakeMessages:
 class _FakeAnthropicClient:
     def __init__(self, response):
         self.messages = _FakeMessages(response)
+
+
+class _FakeTextBlock:
+    type = "text"
+
+    def __init__(self, text):
+        self.text = text
+
+
+class _SequencedFakeMessages:
+    """Returns one canned response per call, in order — for flows (like catalog
+    discovery) that make more than one messages.create() call."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+
+    def create(self, **kwargs):
+        return self._responses.pop(0)
+
+
+class _SequencedFakeClient:
+    def __init__(self, responses):
+        self.messages = _SequencedFakeMessages(responses)
 
 
 def test_call_tool_extracts_the_matching_tool_use_block(monkeypatch):
@@ -155,3 +211,49 @@ def test_draft_route_stops_falls_back_when_the_agent_response_is_malformed(monke
 
     stops = svc.draft_route_stops("paris", "Paris", days=3)
     assert stops[0]["name"] == "Arrive in Paris"  # simulated fallback, not a crash
+
+
+def test_discover_catalog_researches_then_structures_with_booking_links(monkeypatch):
+    """Catalog discovery is two calls: a web-search-enabled research pass (plain text
+    out), then a forced-tool pass that structures it — including validating each
+    booking_url against the domain allowlist."""
+    research_response = _FakeResponse([_FakeTextBlock("Found a great nonstop on momondo and a flat on airbnb...")])
+    structured_input = {"options": [
+        {"item_type": "flight", "title": "JFK-BLR nonstop", "cost_estimate": 900, "platform": "momondo", "booking_url": "https://www.momondo.ca/flight-search"},
+        {"item_type": "flight", "title": "BLR-JFK nonstop", "cost_estimate": 900, "platform": "momondo", "booking_url": "https://www.momondo.ca/flight-search"},
+        {"item_type": "stay", "title": "Koramangala flat", "cost_estimate": 120, "platform": "airbnb", "booking_url": "https://www.airbnb.com/s/Bangalore/homes"},
+        {"item_type": "activity", "title": "Nandi Hills sunrise tour", "cost_estimate": 40, "platform": "viator", "booking_url": "https://www.viator.com/search/Bangalore"},
+        {"item_type": "activity", "title": "Cubbon Park walk", "cost_estimate": 0},
+        {"item_type": "activity", "title": "Craft brewery hop", "cost_estimate": 30, "platform": "yelp", "booking_url": "https://www.yelp.com/not-an-allowed-domain"},
+    ]}
+    tool_response = _FakeResponse([_FakeToolUseBlock("propose_options", structured_input)])
+    fake_client = _SequencedFakeClient([research_response, tool_response])
+    monkeypatch.setattr(svc, "_get_client", lambda: fake_client)
+
+    options = svc.discover_catalog("fallback", "Bangalore, India")
+    assert len(options) == 6
+    assert options[0]["booking_url"] == "https://www.momondo.ca/flight-search"
+    assert options[4]["booking_url"] is None  # no platform/url offered — left blank, not guessed
+    assert options[5]["booking_url"] is None  # yelp.com isn't an allowed domain — dropped
+
+
+def test_discover_catalog_falls_back_when_research_produces_no_summary(monkeypatch):
+    fake_client = _SequencedFakeClient([_FakeResponse([])])  # empty research response
+    monkeypatch.setattr(svc, "_get_client", lambda: fake_client)
+
+    options = svc.discover_catalog("paris", "Paris")
+    assert len(options) == 6
+    assert options[0]["title"] == "Flight to Paris"  # simulated fallback, not a crash
+
+
+def test_discover_catalog_falls_back_when_research_gets_truncated(monkeypatch):
+    """Regression test: too many web searches once filled the research call's token
+    budget before it could write a summary (stop_reason="max_tokens", found live — see
+    docs/ROADMAP.md). A truncated response must not be treated as usable research."""
+    truncated = _FakeResponse([_FakeTextBlock("Found a flight on mo")], stop_reason="max_tokens")
+    fake_client = _SequencedFakeClient([truncated])
+    monkeypatch.setattr(svc, "_get_client", lambda: fake_client)
+
+    options = svc.discover_catalog("paris", "Paris")
+    assert len(options) == 6
+    assert options[0]["title"] == "Flight to Paris"  # simulated fallback, not garbled truncated text

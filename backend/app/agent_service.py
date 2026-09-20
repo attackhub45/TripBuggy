@@ -10,12 +10,42 @@ import json
 import logging
 import random
 from typing import Dict, List, Optional
+from urllib.parse import quote, urlparse
 
 from anthropic import Anthropic
 
 from .config import settings
 
 logger = logging.getLogger(__name__)
+
+# Domains the agent is allowed to hand a customer a booking link to. A model-generated
+# URL is only ever surfaced if it resolves to one of these — see _validate_booking_url.
+ALLOWED_BOOKING_DOMAINS = {
+    "momondo.ca", "www.momondo.ca",
+    "priceline.com", "www.priceline.com",
+    "airbnb.com", "www.airbnb.com", "airbnb.ca", "www.airbnb.ca",
+    "booking.com", "www.booking.com",
+    "kayak.com", "www.kayak.com", "kayak.ca", "www.kayak.ca",
+    "expedia.com", "www.expedia.com", "expedia.ca", "www.expedia.ca",
+    "skyscanner.com", "www.skyscanner.com", "skyscanner.ca", "www.skyscanner.ca",
+    "viator.com", "www.viator.com",
+    "getyourguide.com", "www.getyourguide.com",
+    "tripadvisor.com", "www.tripadvisor.com",
+}
+
+
+def _validate_booking_url(url: object) -> Optional[str]:
+    """Only ever surface a link to a real, known booking platform — never render an
+    unvalidated model-generated URL straight to the customer."""
+    if not isinstance(url, str) or not url:
+        return None
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return None
+    if parsed.scheme != "https" or parsed.netloc.lower() not in ALLOWED_BOOKING_DOMAINS:
+        return None
+    return url
 
 DESTINATIONS: Dict[str, Dict] = {
     "paris": {"aliases": ["paris", "france"], "name": "Paris"},
@@ -244,10 +274,17 @@ def discover_catalog(
         return _simulate_discover_catalog(destination_key, name)
 
 
+WEB_SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 4}
+
+
 def _agent_discover_catalog(
     name: str, when_answer: Optional[str], who_answer: Optional[str], budget_answer: Optional[str],
     pace_answer: Optional[str], route_stop_names: Optional[List[str]],
 ) -> List[Dict[str, object]]:
+    """Two-step: first research real current options with live web search, then turn
+    that research into structured catalog items — each with a real booking-site search
+    link the customer can follow to book it themselves (TripBuggy never books for real,
+    per docs/BRD.md's stated v1 scope)."""
     context = [f"Destination: {name}"]
     if when_answer:
         context.append(f"When: {when_answer}")
@@ -259,21 +296,47 @@ def _agent_discover_catalog(
         context.append(f"Pace: {pace_answer}")
     if route_stop_names:
         context.append("Planned route: " + ", ".join(route_stop_names))
+    context_text = "\n".join(context)
+
+    client = _get_client()
+    if client is None:
+        raise RuntimeError("no ANTHROPIC_API_KEY configured")
+
+    research = client.messages.create(
+        model=settings.anthropic_model,
+        max_tokens=4000,
+        system=(
+            "You are the trip-planning agent for TripBuggy, researching real current travel options with web "
+            "search. Be efficient: at most 3-4 targeted searches total — combine related lookups (e.g. one "
+            "search can cover both flight legs) instead of searching once per item — and keep your write-up "
+            "brief, a sentence or two per item, not paragraphs. For each type of option, note which real "
+            "booking platform is best suited to search it on — momondo.ca or priceline.com generally fit "
+            "flights best, airbnb.com generally fits stays best, and a reputable activity platform (e.g. "
+            "viator.com, getyourguide.com) fits activities — but use your judgment and what you actually find "
+            "to pick whichever is genuinely the best fit. Cover exactly: one outbound flight, one return "
+            "flight, one stay, and three activities, each with a realistic current USD price and which "
+            "platform you'd point the customer to."
+        ),
+        tools=[WEB_SEARCH_TOOL],
+        messages=[{"role": "user", "content": context_text}],
+    )
+    summary_text = "".join(block.text for block in research.content if block.type == "text").strip()
+    if research.stop_reason == "max_tokens" or not summary_text:
+        raise RuntimeError(f"web research didn't finish cleanly (stop_reason={research.stop_reason})")
 
     result = _call_tool(
         system=(
-            "You are the trip-planning agent for TripBuggy. You surface flight, stay, and activity options. "
-            "This is simulated inventory, not a live booking search — prioritize specific, appealing, "
-            "destination-grounded titles over exact real-world pricing."
+            "You are the trip-planning agent for TripBuggy. Turn the research summary below into structured "
+            "catalog options for a customer to review and book themselves — TripBuggy doesn't book anything "
+            "for real. For each option's booking_url, construct a real, working SEARCH RESULTS page URL (not "
+            "a specific listing, which wouldn't stay valid) on the platform you chose — only use a URL "
+            "pattern you're confident is correct and currently valid for that site, prefilled with whatever "
+            "you know (destination, dates if you have them). If you aren't confident a working URL exists for "
+            "that platform, omit booking_url for that item rather than guessing."
         ),
-        user=(
-            "Surface exactly 6 options to add to this itinerary: one outbound flight, one return flight, one "
-            "stay, and three activities. Cost estimates should be plausible in USD and should reflect the "
-            "stated budget vibe (Budget-friendly should feel noticeably cheaper than Treat yourself).\n\n"
-            + "\n".join(context)
-        ),
+        user=f"Research summary:\n{summary_text}\n\nOriginal trip context:\n{context_text}",
         tool_name="propose_options",
-        description="Return the surfaced flight/stay/activity options.",
+        description="Return the surfaced flight/stay/activity options, each with a booking link where possible.",
         input_schema={
             "type": "object",
             "properties": {
@@ -287,6 +350,8 @@ def _agent_discover_catalog(
                             "item_type": {"type": "string", "enum": ["flight", "stay", "activity"]},
                             "title": {"type": "string"},
                             "cost_estimate": {"type": "number"},
+                            "platform": {"type": "string", "description": "e.g. momondo, priceline, airbnb, viator"},
+                            "booking_url": {"type": "string", "description": "A real search-results URL on that platform, or omit if unsure"},
                         },
                         "required": ["item_type", "title", "cost_estimate"],
                     },
@@ -297,20 +362,33 @@ def _agent_discover_catalog(
     )
     options = _extract_list_field(result, "options")
     return [
-        {"item_type": str(o["item_type"]), "title": str(o["title"]), "cost_estimate": float(o["cost_estimate"])}
+        {
+            "item_type": str(o["item_type"]),
+            "title": str(o["title"]),
+            "cost_estimate": float(o["cost_estimate"]),
+            "platform": str(o["platform"]) if o.get("platform") else None,
+            "booking_url": _validate_booking_url(o.get("booking_url")),
+        }
         for o in options
     ]
 
 
 def _simulate_discover_catalog(destination_key: str, name: str) -> List[Dict[str, object]]:
+    """No web search here — a static Airbnb search link is the one booking_url we can
+    build without live grounding; flights/activities just go without a link."""
     activities = ACTIVITY_POOL.get(destination_key, ACTIVITY_POOL["fallback"])
+
+    def item(item_type: str, title: str, cost: float, platform: Optional[str] = None, booking_url: Optional[str] = None):
+        return {"item_type": item_type, "title": title, "cost_estimate": cost, "platform": platform, "booking_url": booking_url}
+
+    stay_url = f"https://www.airbnb.com/s/{quote(name)}/homes"
     return [
-        {"item_type": "flight", "title": f"Flight to {name}", "cost_estimate": 420},
-        {"item_type": "stay", "title": f"Boutique stay near the center of {name}", "cost_estimate": 640},
-        {"item_type": "activity", "title": activities[0], "cost_estimate": 85},
-        {"item_type": "activity", "title": activities[1], "cost_estimate": 60},
-        {"item_type": "activity", "title": activities[2], "cost_estimate": 110},
-        {"item_type": "flight", "title": f"Flight home from {name}", "cost_estimate": 390},
+        item("flight", f"Flight to {name}", 420),
+        item("stay", f"Boutique stay near the center of {name}", 640, "airbnb", stay_url),
+        item("activity", activities[0], 85),
+        item("activity", activities[1], 60),
+        item("activity", activities[2], 110),
+        item("flight", f"Flight home from {name}", 390),
     ]
 
 

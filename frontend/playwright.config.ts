@@ -19,7 +19,9 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: [['html', { open: 'never' }], ['list']],
-  timeout: 45_000,
+  // full-trip.spec.ts's Discover step can take well over a minute against a real API
+  // key (live web search per item) — see helpers.ts:goToDiscoverAndWait.
+  timeout: 240_000,
   expect: { timeout: 15_000 },
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5173',
