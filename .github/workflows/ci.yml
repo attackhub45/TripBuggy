@@ -1,0 +1,169 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tripbuggy
+          POSTGRES_PASSWORD: tripbuggy_ci
+          POSTGRES_DB: tripbuggy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tripbuggy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://tripbuggy:tripbuggy_ci@localhost:5432/tripbuggy
+      JWT_SECRET: ci-only-secret-not-for-production
+      # conftest.py forces this empty anyway, but set it here too so no test can
+      # accidentally make a live call.
+      ANTHROPIC_API_KEY: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Run pytest
+        working-directory: backend
+        run: pytest
+
+  frontend-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Typecheck + build
+        working-directory: frontend
+        run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: [backend-tests, frontend-checks]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tripbuggy
+          POSTGRES_PASSWORD: tripbuggy_ci
+          POSTGRES_DB: tripbuggy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U tripbuggy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://tripbuggy:tripbuggy_ci@localhost:5432/tripbuggy
+      JWT_SECRET: ci-only-secret-not-for-production
+      # Forces agent_service.py's deterministic simulated fallback — no live LLM calls
+      # from CI. The Playwright specs assert structure/behavior, not exact agent
+      # wording, so they pass identically whether this is set or not.
+      ANTHROPIC_API_KEY: ''
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt
+
+      - name: Apply database migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Start backend
+        working-directory: backend
+        run: nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 > backend.log 2>&1 &
+
+      - name: Wait for backend to come up
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          echo "backend never came up"; cat backend/backend.log; exit 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Start frontend
+        working-directory: frontend
+        run: nohup npm run dev -- --host 0.0.0.0 --port 5173 > frontend.log 2>&1 &
+
+      - name: Wait for frontend to come up
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:5173 > /dev/null && exit 0
+            sleep 1
+          done
+          echo "frontend never came up"; cat frontend/frontend.log; exit 1
+
+      - name: Run Playwright E2E suite
+        working-directory: frontend
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report
+          retention-days: 14
+
+      - name: Upload server logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-logs
+          path: |
+            backend/backend.log
+            frontend/frontend.log
+          retention-days: 14

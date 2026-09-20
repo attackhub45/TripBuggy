@@ -54,7 +54,7 @@ export function TripsListScreen() {
     }
   }
 
-  async function useTemplate(templateId: string) {
+  async function applyTemplate(templateId: string) {
     setOpeningId(templateId);
     try {
       await startFromTemplate(templateId);
@@ -150,7 +150,7 @@ export function TripsListScreen() {
             {templates.map((template) => (
               <div key={template.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12, border: '1px solid var(--border)' }}>
                 <button
-                  onClick={() => void useTemplate(template.id)}
+                  onClick={() => void applyTemplate(template.id)}
                   disabled={openingId !== null || confirmDeleteId === template.id}
                   style={{
                     all: 'unset', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12,

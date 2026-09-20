@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { matchDestination, type DestinationKey } from '../art/DestinationArt';
+import type { DestinationKey } from '../art/DestinationArt';
 import { api, ensureAuthenticated, setActiveTripId, AuthError, type ApiTrip } from '../api/client';
 import { useToastStore } from './toastStore';
 import { friendlyMessage } from '../lib/errors';
