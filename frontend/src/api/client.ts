@@ -215,3 +215,11 @@ export const api = {
   createTripFromTemplate: (templateId: string) =>
     request<ApiTrip>(`/api/v1/trips/from-template/${templateId}`, { method: 'POST' }),
 };
+
+export const assistant = {
+  ask: (question: string, screen: string, tripId: string | null) =>
+    request<{ answer: string }>('/api/v1/assistant/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, screen, trip_id: tripId }),
+    }),
+};

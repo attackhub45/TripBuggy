@@ -355,3 +355,92 @@ def _agent_interpret_change(prompt_text: str, booked_items: List[Dict[str, str]]
     if isinstance(idx, int) and 0 <= idx < len(booked_items):
         return booked_items[idx]["id"]
     return None
+
+
+# ---------------------------------------------------------------------------
+# In-app assistant — free-text Q&A about whatever's on screen, from the
+# floating widget (frontend/src/components/AssistantWidget.tsx).
+# ---------------------------------------------------------------------------
+
+SCREEN_HELP: Dict[str, str] = {
+    "home": "Type a destination and hit \"Plan my trip\" to start — or click \"Surprise me\" for a random pick.",
+    "flow": "Answer each question by tapping a chip. Your answers shape the route and catalog the agent drafts later.",
+    "summary": "Confirm your trip length and any special requests here. Traveling with others? Invite them by email and they'll get editor access.",
+    "route": "This is the agent's drafted route. Reorder stops with the arrows, remove ones you don't want, or add your own at the bottom.",
+    "discover": "The agent suggests flights, stays, and activities here. Click Add on anything you like, or use manual entry for something it missed.",
+    "itinerary": "Items are placed on days and time slots — change either with the dropdowns. A banner warns you if you're over budget or double-booked.",
+    "booking": "The autonomy dial controls how much the agent can book without asking: draft only, approve each item, or fully automatic.",
+    "road": "Tell the agent about anything that changes mid-trip — it figures out which booking is affected and sends it back for approval.",
+    "recap": "\"Save as template\" keeps this trip's destination, answers, and route so you can reuse them the next time you plan something similar.",
+    "trips": "Trips you own or were invited to live here, along with any templates you've saved.",
+}
+
+
+def summarize_trip_for_assistant(trip) -> Dict[str, object]:
+    """A compact snapshot of the current trip, used to ground the assistant's answer —
+    not the full TripOut shape, just what's useful for a customer's question."""
+    return {
+        "destination": trip.destination_raw,
+        "trip_status": trip.status,
+        "days": trip.days,
+        "when": trip.when_answer,
+        "who": trip.who_answer,
+        "budget_vibe": trip.budget_answer,
+        "pace": trip.pace_answer,
+        "is_international": trip.is_international,
+        "autonomy_level": trip.autonomy_level,
+        "item_count": len(trip.items),
+        "budget_total": sum(i.cost_estimate for i in trip.items),
+        "budget_cap": budget_cap_for(trip.budget_answer),
+        "crew_count": len(trip.crew),
+    }
+
+
+def answer_assistant_question(question: str, screen: str, trip_context: Optional[Dict[str, object]]) -> str:
+    try:
+        return _agent_answer_assistant_question(question, screen, trip_context)
+    except Exception as exc:
+        logger.warning("Assistant Q&A fell back to a canned screen blurb: %s", exc)
+        return SCREEN_HELP.get(screen, "I can't reach the assistant right now — please try again in a moment.")
+
+
+def _agent_answer_assistant_question(question: str, screen: str, trip_context: Optional[Dict[str, object]]) -> str:
+    client = _get_client()
+    if client is None:
+        raise RuntimeError("no ANTHROPIC_API_KEY configured")
+
+    context_lines = [f"Current screen: {screen}"]
+    if screen in SCREEN_HELP:
+        context_lines.append(f"What this screen actually does: {SCREEN_HELP[screen]}")
+    if trip_context:
+        context_lines.append("Background — the trip currently open in the app (may not be relevant to this question):")
+        for key, value in trip_context.items():
+            if value is not None:
+                context_lines.append(f"  {key}: {value}")
+
+    response = client.messages.create(
+        model=settings.anthropic_model,
+        max_tokens=300,
+        system=(
+            "You are the in-app help assistant for TripBuggy, a trip-planning app. A customer is looking at "
+            "the app right now and has a question about what's on their screen or how something works. Answer "
+            "briefly and conversationally — two or three sentences at most, no markdown or bullet lists. If "
+            "their question isn't about the app, gently steer them back to trip planning.\n\n"
+            "\"What this screen actually does\", when present below, is ground truth for the current screen — "
+            "defer to it over any assumption you'd otherwise make about a control's behavior.\n\n"
+            "The trip background below, when present, describes whatever trip happens to be open in the app "
+            "right now — it is NOT necessarily what the question is about. Only bring it up if the question is "
+            "actually about that specific trip's state (its budget, its answers, its autonomy setting, etc). "
+            "A question about how a screen or control works in general (e.g. \"what does Surprise me do?\") "
+            "should get a general answer about the app, not one bent around the open trip's details.\n\n"
+            "You can only explain and inform — you have no ability to click anything, change any setting, or "
+            "modify the trip yourself. If the customer asks you to do something (add an item, change the "
+            "budget, book something, invite someone, anything), do not imply you did it or will do it. Tell "
+            "them exactly which button or field on the page to use instead."
+        ),
+        messages=[{"role": "user", "content": "\n".join(context_lines) + f"\n\nQuestion: {question}"}],
+    )
+    text = "".join(block.text for block in response.content if block.type == "text").strip()
+    if not text:
+        raise RuntimeError("Claude response had no text content")
+    return text

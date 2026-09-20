@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { DestinationArtDefs } from './art/DestinationArt';
 import { AccountBar } from './components/AccountBar';
 import { ToastHost } from './components/ToastHost';
+import { AssistantWidget } from './components/AssistantWidget';
 import { getActiveTripId } from './api/client';
 import { useTripStore } from './state/tripStore';
 import { useAuthStore } from './state/authStore';
@@ -58,6 +59,7 @@ export default function App() {
     <BrowserRouter>
       <DestinationArtDefs />
       <ToastHost />
+      <AssistantWidget />
       <div className="app-shell">
         <div className="screen-wrap">
           <AccountBar />

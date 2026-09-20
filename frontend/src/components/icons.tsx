@@ -16,6 +16,25 @@ export function PinIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+export function ChatIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+      <path d="M4 5.5A2.5 2.5 0 016.5 3h11A2.5 2.5 0 0120 5.5v8a2.5 2.5 0 01-2.5 2.5H9l-4.5 4V5.5z" strokeLinejoin="round" />
+      <circle cx="9" cy="9.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="12.5" cy="9.5" r="0.9" fill="currentColor" stroke="none" />
+      <circle cx="16" cy="9.5" r="0.9" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+export function CloseIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" {...props}>
+      <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 /** The TripBuggy mark: a faceted paper airplane, teal with a coral fold-sliver. */
 export function LogoMark(props: React.SVGProps<SVGSVGElement>) {
   return (
