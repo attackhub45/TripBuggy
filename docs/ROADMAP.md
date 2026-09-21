@@ -35,8 +35,8 @@ A prioritized punch-list of what's left across the build and deployment, as of 2
 
 ## Tier 4 — Engineering hygiene (do before or alongside Azure)
 
-- [ ] **Automated tests** — TRD calls for Vitest + React Testing Library (frontend) and pytest (backend). Neither exists yet.
-- [ ] **CI pipeline** — Nothing currently runs checks on push.
+- [x] **Automated tests** — Backend pytest suite (`backend/tests/`, 79 tests) and a Playwright E2E suite (`frontend/e2e/`) both exist. TRD's Vitest + React Testing Library layer for frontend unit tests still doesn't — E2E covers the user-facing flows in the meantime.
+- [x] **CI pipeline** — `.github/workflows/ci.yml` runs pytest, frontend lint + typecheck/build, and the Playwright suite on every push/PR to `main`. (`.github/workflows/e2e-daily.yml` also still runs the E2E suite on a daily schedule as a drift canary.)
 - [ ] **Observability** — No logging/metrics wired in (TRD names Azure Application Insights).
 
 ## Tier 5 — Azure deployment
