@@ -19,11 +19,11 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.db import Base
+from app.db import Base, normalize_database_url
 from app.deps import get_db
 from app.main import app
 
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", settings.database_url)
+TEST_DATABASE_URL = normalize_database_url(os.environ.get("TEST_DATABASE_URL", settings.database_url))
 engine = create_engine(TEST_DATABASE_URL)
 
 
