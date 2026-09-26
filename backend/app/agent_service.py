@@ -122,12 +122,14 @@ def _get_client() -> Optional[Anthropic]:
     return _client
 
 
-def _call_tool(system: str, user: str, tool_name: str, description: str, input_schema: dict) -> dict:
+def _call_tool(
+    system: str, user: str, tool_name: str, description: str, input_schema: dict, model: Optional[str] = None,
+) -> dict:
     client = _get_client()
     if client is None:
         raise RuntimeError("no ANTHROPIC_API_KEY configured")
     response = client.messages.create(
-        model=settings.anthropic_model,
+        model=model or settings.anthropic_model,
         max_tokens=1024,
         system=system,
         messages=[{"role": "user", "content": user}],
@@ -325,6 +327,7 @@ def _agent_discover_catalog(
         raise RuntimeError(f"web research didn't finish cleanly (stop_reason={research.stop_reason})")
 
     result = _call_tool(
+        model=settings.anthropic_model_fast,
         system=(
             "You are the trip-planning agent for TripBuggy. Turn the research summary below into structured "
             "catalog options for a customer to review and book themselves — TripBuggy doesn't book anything "
@@ -497,7 +500,7 @@ def _agent_answer_assistant_question(question: str, screen: str, trip_context: O
                 context_lines.append(f"  {key}: {value}")
 
     response = client.messages.create(
-        model=settings.anthropic_model,
+        model=settings.anthropic_model_fast,
         max_tokens=300,
         system=(
             "You are the in-app help assistant for TripBuggy, a trip-planning app. A customer is looking at "

@@ -1,0 +1,25 @@
+name: Deploy backend to Azure App Service
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/deploy-backend.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Oryx builds the app server-side (pip install -r requirements.txt) once
+      # SCM_DO_BUILD_DURING_DEPLOYMENT=true is set on the Web App — see docs/ROADMAP.md
+      # for the one-time `az webapp config appsettings set` that enables this.
+      - name: Deploy to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
+          publish-profile: ${{ secrets.AZURE_WEBAPP_PUBLISH_PROFILE }}
+          package: backend

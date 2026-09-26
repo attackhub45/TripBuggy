@@ -39,14 +39,81 @@ A prioritized punch-list of what's left across the build and deployment, as of 2
 - [x] **CI pipeline** — `.github/workflows/ci.yml` runs pytest, frontend lint + typecheck/build, and the Playwright suite on every push/PR to `main`. (`.github/workflows/e2e-daily.yml` also still runs the E2E suite on a daily schedule as a drift canary.)
 - [ ] **Observability** — No logging/metrics wired in (TRD names Azure Application Insights).
 
-## Tier 5 — Azure deployment
+## Tier 5 — Azure deployment (free tier)
 
-Nothing provisioned yet beyond installing the Azure CLI locally. Full detail in the runbook from earlier — summarized here:
+Azure App Service has no free managed Postgres long-term, so the plan mixes providers: Azure hosts
+compute (free), a third-party host provides Postgres (free). CORS is now configurable via
+`CORS_ORIGINS` (see `backend/app/config.py`) instead of hardcoded — no more code changes needed
+before deploying. `.github/workflows/deploy-backend.yml` and `deploy-frontend.yml` already exist
+and fire on every push to `main` once the secrets below are set; `backend/startup.sh` is the App
+Service startup command (runs `alembic upgrade head` then serves with gunicorn+uvicorn workers).
 
-- [ ] `az login` (you) + confirm subscription
-- [ ] Provision: resource group, Postgres Flexible Server, backend App Service, frontend Static Web App, Key Vault
-- [ ] First deploy: push backend + frontend code, run migrations against the Azure DB, fix CORS (currently hardcoded to `localhost:5173`)
-- [ ] CI/CD: GitHub Actions workflows so pushes to `main` auto-deploy both sides
+- [ ] **Postgres**: create a free project on [Neon](https://neon.tech) or [Supabase](https://supabase.com), grab the connection string, run `alembic upgrade head` against it once from a local shell.
+- [ ] **`az login`** (you) + confirm subscription.
+- [ ] **Provision** (all free-tier SKUs):
+  ```bash
+  az group create -n tripbuggy-rg -l eastus
+  az appservice plan create -n tripbuggy-plan -g tripbuggy-rg --sku F1 --is-linux
+  az webapp create -n <unique-backend-name> -g tripbuggy-rg -p tripbuggy-plan --runtime "PYTHON:3.11"
+  az webapp config set -n <unique-backend-name> -g tripbuggy-rg --startup-file "startup.sh"
+  az webapp config appsettings set -n <unique-backend-name> -g tripbuggy-rg --settings \
+    SCM_DO_BUILD_DURING_DEPLOYMENT=true \
+    DATABASE_URL="<neon/supabase connection string>" \
+    JWT_SECRET="<generate a real random secret>" \
+    ANTHROPIC_API_KEY="<optional>" \
+    CORS_ORIGINS="https://<your-static-web-app>.azurestaticapps.net"
+  az staticwebapp create -n tripbuggy-frontend -g tripbuggy-rg -l eastus2 --sku Free
+  ```
+- [ ] **Get deploy credentials** and add them as GitHub repo secrets (Settings → Secrets and variables → Actions):
+  - `AZURE_WEBAPP_NAME` = the backend app name you chose above
+  - `AZURE_WEBAPP_PUBLISH_PROFILE` = output of `az webapp deployment list-publishing-profiles -n <backend-name> -g tripbuggy-rg --xml`
+  - `AZURE_STATIC_WEB_APPS_API_TOKEN` = output of `az staticwebapp secrets list -n tripbuggy-frontend --query "properties.apiKey" -o tsv`
+  - `VITE_API_URL` = `https://<unique-backend-name>.azurewebsites.net`
+- [ ] **First deploy**: push to `main` (or run each workflow manually via `workflow_dispatch`) — both sides deploy automatically from then on.
+- [ ] **Observability**: still open — wire up Azure Application Insights once the above is live (see Tier 4).
+
+### Scaling beyond free tier
+
+The free SKUs above cap out fast (App Service F1: 60 CPU-min/day, single shared core, no
+autoscale; free Postgres: small storage/connection limits, autosuspends when idle). None of this
+requires code changes to outgrow — it's a config/SKU change:
+
+- App Service: `az appservice plan update -n tripbuggy-plan -g tripbuggy-rg --sku B1` (or `S1`/`P1v3`
+  for autoscale) once traffic is real.
+- Postgres: upgrade the Neon/Supabase plan, or migrate to Azure Database for PostgreSQL Flexible
+  Server (General Purpose tier) if you want everything under one Azure bill.
+- Static Web Apps: Free tier's CDN already scales; upgrade to Standard (~$9/mo) only if you need
+  more than 100GB/month bandwidth or private endpoints.
+
+### Managing the Anthropic cost
+
+At meaningful scale, the Anthropic API — not Azure — is the dominant line item, driven mostly by
+Discover's live web search. Two levers, in order of impact:
+
+1. **Cache Discover results** (biggest lever, not yet implemented) — skip re-running the
+   web-search research call when a trip's inputs (destination/when/who/budget/pace) haven't
+   changed, and share cached results across different users with the same profile+destination.
+   Needs a TTL (e.g. 24-48h) so prices/links don't go stale forever.
+2. **Cheaper model for mechanical calls** (done) — `app/config.py`'s `anthropic_model_fast`
+   (`claude-haiku-4-5-20251001`) now handles the catalog-structuring pass in
+   `_agent_discover_catalog` and the in-app assistant widget's Q&A
+   (`_agent_answer_assistant_question`) — both are reformatting/lookup tasks that don't need
+   Sonnet-level reasoning. Route drafting and change-request interpretation stay on
+   `anthropic_model` (Sonnet), since those still benefit from stronger reasoning.
+
+Reference pricing (per [claude.com/pricing](https://claude.com/pricing), fetched 2026-09-26 —
+check current rates before relying on this for budgeting):
+
+| | Sonnet 5 | Haiku 4.5 |
+|---|---|---|
+| Input | $2 / MTok | $1 / MTok |
+| Output | $10 / MTok | $5 / MTok |
+| Prompt cache read | $0.20 / MTok | $0.10 / MTok |
+| Prompt cache write | $2.50 / MTok | $1.25 / MTok |
+
+Web search tool: $10 per 1,000 searches, separate from token cost — this is why caching
+Discover's results (lever 1) matters more than the model swap does; Haiku only affects the two
+calls that don't touch web search.
 
 ---
 
