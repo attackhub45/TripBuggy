@@ -41,7 +41,7 @@ test('walks one full trip from Home through Recap, including the on-the-road cha
   await page.getByRole('button', { name: 'Tell the agent' }).click();
   await expect(page).toHaveURL(/\/booking$/);
   await expect(page.getByText('Resolving an on-the-road change')).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'Approve' }).click();
+  await page.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(page.getByText('Booked', { exact: true })).toHaveCount(2);
 
   // Back on the road, then wrap the trip up.
