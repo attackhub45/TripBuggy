@@ -33,6 +33,9 @@ ALLOWED_BOOKING_DOMAINS = {
     "viator.com", "www.viator.com",
     "getyourguide.com", "www.getyourguide.com",
     "tripadvisor.com", "www.tripadvisor.com",
+    # Google Flights' query-based search (?q=Flights+to+X) auto-detects the customer's own
+    # origin — the one flight-search entry point that needs no origin/dates to be useful.
+    "google.com", "www.google.com",
 }
 
 
@@ -175,6 +178,57 @@ def _extract_list_field(result: dict, field: str) -> list:
         if isinstance(parsed, dict) and isinstance(parsed.get(field), list):
             return parsed[field]
     raise RuntimeError(f"Claude did not return a usable '{field}' list")
+
+
+# ---------------------------------------------------------------------------
+# Destination verification — Home screen, before a trip is even created. Catches typos/
+# casing (customer's own free-text input) and flags names that don't look like a real
+# place at all, offering close real alternatives instead of silently accepting gibberish.
+# ---------------------------------------------------------------------------
+
+def verify_destination(raw: str) -> Dict[str, object]:
+    try:
+        return _agent_verify_destination(raw)
+    except Exception as exc:
+        logger.warning("Destination verification fell back to accepting it as-is: %s", exc)
+        return {"is_real_place": True, "corrected_name": raw.strip(), "suggestions": []}
+
+
+def _agent_verify_destination(raw: str) -> Dict[str, object]:
+    result = _call_tool(
+        model=settings.anthropic_model_fast,
+        system=(
+            "You are verifying a travel destination a customer typed into a trip-planning app's free-text "
+            "field. Determine whether it names a real, recognizable geographic place — a city, region, "
+            "country, or well-known landmark/area — even if the capitalization or spelling is messy (e.g. "
+            "'pariss', 'NEW YORK', 'tokyo japan' are all real places, just typed carelessly). Be lenient: "
+            "vague-but-real regions, small towns, and unusual-sounding but genuine places should still count "
+            "as real. Only mark something as not real if it's genuinely gibberish, a non-place word, or you "
+            "have no reasonable idea what real place they meant.\n\n"
+            "If it is real: set is_real_place true, and corrected_name to the properly capitalized, "
+            "correctly spelled version (e.g. 'Paris', 'New York', 'Tokyo, Japan').\n"
+            "If it is not real: set is_real_place false, keep corrected_name as their original text "
+            "unchanged, and suggestions to up to 3 real places that are visually or phonetically close to "
+            "what they typed, in case it's a typo of somewhere real."
+        ),
+        user=f'The customer typed: "{raw}"',
+        tool_name="verify_place",
+        description="Report whether the typed destination is a real place, its corrected spelling/casing, and close alternatives if not.",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "is_real_place": {"type": "boolean"},
+                "corrected_name": {"type": "string"},
+                "suggestions": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+            },
+            "required": ["is_real_place", "corrected_name", "suggestions"],
+        },
+    )
+    return {
+        "is_real_place": bool(result.get("is_real_place", True)),
+        "corrected_name": str(result.get("corrected_name") or raw.strip()),
+        "suggestions": [str(s) for s in _extract_list_field({"suggestions": result.get("suggestions", [])}, "suggestions")],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -330,8 +384,10 @@ def _agent_discover_catalog(
             "brief, a sentence or two per item, not paragraphs. For each type of option, note which real "
             "booking platform is best suited to search it on — momondo.ca or priceline.com generally fit "
             "flights best, airbnb.com generally fits stays best, and a reputable activity platform (e.g. "
-            "viator.com, getyourguide.com) fits activities — but use your judgment and what you actually find "
-            "to pick whichever is genuinely the best fit. Cover exactly: one outbound flight, one return "
+            "viator.com, getyourguide.com, tripadvisor.com) fits activities — but use your judgment and what "
+            "you actually find to pick whichever is genuinely the best fit. Every item needs a platform — this "
+            "is non-negotiable, so if nothing stands out as clearly best, default to Google Flights for "
+            "flights, Airbnb for the stay, and TripAdvisor for activities. Cover exactly: one outbound flight, one return "
             "flight, one stay, and three activities, each with a realistic current USD price and which "
             "platform you'd point the customer to."
         ),
@@ -347,15 +403,21 @@ def _agent_discover_catalog(
         system=(
             "You are the trip-planning agent for TripBuggy. Turn the research summary below into structured "
             "catalog options for a customer to review and book themselves — TripBuggy doesn't book anything "
-            "for real. For each option's booking_url, construct a real, working SEARCH RESULTS page URL (not "
-            "a specific listing, which wouldn't stay valid) on the platform you chose — only use a URL "
-            "pattern you're confident is correct and currently valid for that site, prefilled with whatever "
-            "you know (destination, dates if you have them). If you aren't confident a working URL exists for "
-            "that platform, omit booking_url for that item rather than guessing."
+            "for real. Every single option must have a platform and a booking_url — the customer should never "
+            "see a price with nowhere to act on it. Construct a real, working SEARCH RESULTS page URL (not a "
+            "specific listing, which wouldn't stay valid) on the platform you chose, prefilled with whatever "
+            "you know (destination, dates if you have them), using a URL pattern you're genuinely confident is "
+            "correct and currently valid for that site. If you're not confident about a more specific "
+            "platform's URL for a given item, fall back to one of these verified-safe generic searches instead "
+            "of guessing or leaving it blank — never omit booking_url:\n"
+            "  flight: https://www.google.com/travel/flights?q=Flights+to+<destination> "
+            "(auto-detects the customer's own origin, so no origin/dates needed)\n"
+            "  stay: https://www.airbnb.com/s/<destination>/homes\n"
+            "  activity: https://www.tripadvisor.com/Search?q=<destination>+things+to+do"
         ),
         user=f"Research summary:\n{summary_text}\n\nOriginal trip context:\n{context_text}",
         tool_name="propose_options",
-        description="Return the surfaced flight/stay/activity options, each with a booking link where possible.",
+        description="Return the surfaced flight/stay/activity options, each with a real booking link.",
         input_schema={
             "type": "object",
             "properties": {
@@ -369,10 +431,10 @@ def _agent_discover_catalog(
                             "item_type": {"type": "string", "enum": ["flight", "stay", "activity"]},
                             "title": {"type": "string"},
                             "cost_estimate": {"type": "number"},
-                            "platform": {"type": "string", "description": "e.g. momondo, priceline, airbnb, viator"},
-                            "booking_url": {"type": "string", "description": "A real search-results URL on that platform, or omit if unsure"},
+                            "platform": {"type": "string", "description": "e.g. momondo, priceline, airbnb, viator, tripadvisor, Google Flights"},
+                            "booking_url": {"type": "string", "description": "A real search-results URL on that platform — required, use one of the generic fallbacks if unsure of a more specific one"},
                         },
-                        "required": ["item_type", "title", "cost_estimate"],
+                        "required": ["item_type", "title", "cost_estimate", "platform", "booking_url"],
                     },
                 }
             },
@@ -393,21 +455,26 @@ def _agent_discover_catalog(
 
 
 def _simulate_discover_catalog(destination_key: str, name: str) -> List[Dict[str, object]]:
-    """No web search here — a static Airbnb search link is the one booking_url we can
-    build without live grounding; flights/activities just go without a link."""
+    """No web search here, so no per-item pricing or availability is real — but every item
+    still gets a genuine, verified-working search-page link (see docs/ROADMAP.md), never a
+    fabricated deep link: Airbnb for stays, TripAdvisor for activities, and Google Flights'
+    query search for flights, which conveniently auto-detects the customer's own origin
+    rather than needing one we don't have in simulated mode."""
     activities = ACTIVITY_POOL.get(destination_key, ACTIVITY_POOL["fallback"])
 
-    def item(item_type: str, title: str, cost: float, platform: Optional[str] = None, booking_url: Optional[str] = None):
+    def item(item_type: str, title: str, cost: float, platform: str, booking_url: str):
         return {"item_type": item_type, "title": title, "cost_estimate": cost, "platform": platform, "booking_url": booking_url}
 
     stay_url = f"https://www.airbnb.com/s/{quote(name)}/homes"
+    flight_url = f"https://www.google.com/travel/flights?q={quote(f'Flights to {name}')}"
+    activity_url = f"https://www.tripadvisor.com/Search?q={quote(f'{name} things to do')}"
     return [
-        item("flight", f"Flight to {name}", 420),
+        item("flight", f"Flight to {name}", 420, "Google Flights", flight_url),
         item("stay", f"Boutique stay near the center of {name}", 640, "airbnb", stay_url),
-        item("activity", activities[0], 85),
-        item("activity", activities[1], 60),
-        item("activity", activities[2], 110),
-        item("flight", f"Flight home from {name}", 390),
+        item("activity", activities[0], 85, "TripAdvisor", activity_url),
+        item("activity", activities[1], 60, "TripAdvisor", activity_url),
+        item("activity", activities[2], 110, "TripAdvisor", activity_url),
+        item("flight", f"Flight home from {name}", 390, "Google Flights", flight_url),
     ]
 
 

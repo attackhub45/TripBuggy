@@ -8,7 +8,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from .config import settings
 from .rate_limit import limiter
-from .routers import admin, assistant, auth, trips
+from .routers import admin, assistant, auth, destinations, trips
 
 app = FastAPI(title="TripBuggy API", version="0.1.0")
 
@@ -37,6 +37,7 @@ app.include_router(auth.router)
 app.include_router(trips.router)
 app.include_router(assistant.router)
 app.include_router(admin.router)
+app.include_router(destinations.router)
 
 
 @app.get("/health")

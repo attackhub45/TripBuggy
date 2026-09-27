@@ -86,7 +86,8 @@ def test_discover_catalog_falls_back_to_six_simulated_items():
     options = svc.discover_catalog("tokyo", "Tokyo")
     assert len(options) == 6
     assert options[0]["item_type"] == "flight"
-    assert options[0]["booking_url"] is None  # simulated flights don't get a link
+    assert options[0]["platform"] == "Google Flights"
+    assert options[0]["booking_url"] == "https://www.google.com/travel/flights?q=Flights%20to%20Tokyo"
 
 
 def test_discover_catalog_simulated_stay_gets_an_airbnb_link():
@@ -94,6 +95,15 @@ def test_discover_catalog_simulated_stay_gets_an_airbnb_link():
     stay = next(o for o in options if o["item_type"] == "stay")
     assert stay["platform"] == "airbnb"
     assert stay["booking_url"] == "https://www.airbnb.com/s/Tokyo/homes"
+
+
+def test_discover_catalog_simulated_activities_get_a_tripadvisor_link():
+    options = svc.discover_catalog("tokyo", "Tokyo")
+    activities = [o for o in options if o["item_type"] == "activity"]
+    assert len(activities) == 3
+    for activity in activities:
+        assert activity["platform"] == "TripAdvisor"
+        assert activity["booking_url"] == "https://www.tripadvisor.com/Search?q=Tokyo%20things%20to%20do"
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +242,36 @@ def test_draft_route_stops_falls_back_when_the_agent_response_is_malformed(monke
 
     stops = svc.draft_route_stops("paris", "Paris", days=3)
     assert stops[0]["name"] == "Arrive in Paris"  # simulated fallback, not a crash
+
+
+# ---------------------------------------------------------------------------
+# Destination verification
+# ---------------------------------------------------------------------------
+
+def test_verify_destination_accepts_a_real_place_and_fixes_casing(monkeypatch):
+    fake_input = {"is_real_place": True, "corrected_name": "Paris", "suggestions": []}
+    fake_client = _FakeAnthropicClient(_FakeResponse([_FakeToolUseBlock("verify_place", fake_input)]))
+    monkeypatch.setattr(svc, "_get_client", lambda: fake_client)
+
+    result = svc.verify_destination("pariss")
+    assert result == {"is_real_place": True, "corrected_name": "Paris", "suggestions": []}
+
+
+def test_verify_destination_flags_gibberish_with_suggestions(monkeypatch):
+    fake_input = {"is_real_place": False, "corrected_name": "Xyzzyplace", "suggestions": ["Paris", "Praze"]}
+    fake_client = _FakeAnthropicClient(_FakeResponse([_FakeToolUseBlock("verify_place", fake_input)]))
+    monkeypatch.setattr(svc, "_get_client", lambda: fake_client)
+
+    result = svc.verify_destination("Xyzzyplace")
+    assert result["is_real_place"] is False
+    assert result["suggestions"] == ["Paris", "Praze"]
+
+
+def test_verify_destination_falls_back_to_accepting_it_as_is_without_a_client(monkeypatch):
+    monkeypatch.setattr(svc, "_get_client", lambda: None)
+
+    result = svc.verify_destination("  Tokyo, Japan  ")
+    assert result == {"is_real_place": True, "corrected_name": "Tokyo, Japan", "suggestions": []}
 
 
 def test_discover_catalog_researches_then_structures_with_booking_links(monkeypatch):

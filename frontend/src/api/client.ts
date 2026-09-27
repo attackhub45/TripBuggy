@@ -135,9 +135,13 @@ export interface ApiDiscoverySuggestion {
   platform: string | null; booking_url: string | null;
 }
 export interface ApiBudget { total: number; cap: number; over_budget: boolean }
+export interface ApiDestinationVerification { is_real_place: boolean; corrected_name: string; suggestions: string[] }
 
 export const api = {
   listTrips: () => request<ApiTripSummary[]>('/api/v1/trips'),
+
+  verifyDestination: (raw: string) =>
+    request<ApiDestinationVerification>('/api/v1/destinations/verify', { method: 'POST', body: JSON.stringify({ raw }) }),
 
   createTrip: (destination: string) =>
     request<ApiTrip>('/api/v1/trips', { method: 'POST', body: JSON.stringify({ destination }) }),

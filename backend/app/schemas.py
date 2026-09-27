@@ -32,6 +32,16 @@ class TripCreateRequest(BaseModel):
     destination: str
 
 
+class DestinationVerifyRequest(BaseModel):
+    raw: str
+
+
+class DestinationVerifyResponse(BaseModel):
+    is_real_place: bool
+    corrected_name: str
+    suggestions: List[str] = []
+
+
 class IntakeAnswerRequest(BaseModel):
     question_key: str  # when|who|budget|pace
     answer_value: str

@@ -122,4 +122,13 @@ calls that don't touch web search.
 
 ---
 
+## Post-launch fixes (GitHub issues)
+
+- [x] **#1 Drag-and-drop route reordering** — see Tier 5/UI history above.
+- [x] **#2 Booking links weren't carried onto Itinerary/Booking** — see above.
+- [x] **#3 Every priced item must have a real source/booking link** — `_simulate_discover_catalog` now gives flights a Google Flights query link (`?q=Flights+to+<destination>`, which auto-detects the customer's own origin — no origin/dates needed) and activities a TripAdvisor search link (`?q=<destination>+things+to+do`), both verified working before hardcoding. The real agent's structuring call now requires `platform`/`booking_url` on every item (schema-enforced, not just prompted) and falls back to these same three verified generic searches — Google Flights, Airbnb, TripAdvisor — instead of ever omitting a link. `google.com` added to `ALLOWED_BOOKING_DOMAINS`.
+- [x] **#4 Place name verification** — new `POST /api/v1/destinations/verify` (Haiku, rate-limited 30/hour): checks the customer's free-text destination is a real place, silently fixes casing/spelling ("pariss" → "Paris"), and offers up to 3 close real alternatives when it doesn't recognize it at all (with a "use it as typed anyway" override — never blocks the customer). Wired into `HomeScreen.tsx`'s "Plan my trip", not "Surprise me" (already a known-valid destination). Fails soft — a verification-call failure just proceeds with the original text rather than blocking trip creation.
+
+---
+
 **Explicitly out of scope for now** (per BRD, not oversights): real flight/hotel bookings against live vendor APIs, real payment processing, real document/visa verification. These are documented Phase 2 items.
