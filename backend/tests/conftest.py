@@ -12,6 +12,9 @@ import os
 from typing import Optional
 
 os.environ["ANTHROPIC_API_KEY"] = ""
+# Rate limits are keyed by client IP — the test suite reuses one process/IP across many
+# calls to the same endpoints, which would trip them well before any real test scenario.
+os.environ["DISABLE_RATE_LIMIT"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient

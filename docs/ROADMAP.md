@@ -37,7 +37,8 @@ A prioritized punch-list of what's left across the build and deployment, as of 2
 
 - [x] **Automated tests** — Backend pytest suite (`backend/tests/`, 79 tests) and a Playwright E2E suite (`frontend/e2e/`) both exist. TRD's Vitest + React Testing Library layer for frontend unit tests still doesn't — E2E covers the user-facing flows in the meantime.
 - [x] **CI pipeline** — `.github/workflows/ci.yml` runs pytest, frontend lint + typecheck/build, and the Playwright suite on every push/PR to `main`. (`.github/workflows/e2e-daily.yml` also still runs the E2E suite on a daily schedule as a drift canary.)
-- [ ] **Observability** — No logging/metrics wired in (TRD names Azure Application Insights).
+- [x] **Observability** — Azure Application Insights, via `azure-monitor-opentelemetry` + `FastAPIInstrumentor` in `app/main.py`. Only activates when `APPLICATIONINSIGHTS_CONNECTION_STRING` is set (the `tripbuggy-insights` resource's connection string, set as a backend app setting) — a no-op for local dev. Captures requests, traces, and everything logged under the `app` logger namespace (including `agent_service.py`'s existing fallback warnings).
+- [x] **Abuse protection** — `slowapi`-based per-IP rate limits (`app/rate_limit.py`) on signup (5/hour — anonymous device accounts were previously unlimited), login (20/hour), and every endpoint that calls the paid Anthropic agent: route drafting (20/hour), Discover (10/hour — the priciest, since it does live web search), change-request interpretation (20/hour), and the assistant widget (30/hour). Disabled during the pytest suite (`DISABLE_RATE_LIMIT=1` in `conftest.py`) since it reuses one process/IP across many calls; verified separately in `tests/test_rate_limit.py`, which turns it on just for that one test.
 
 ## Tier 5 — Azure deployment (free tier)
 
@@ -70,7 +71,7 @@ Service startup command (runs `alembic upgrade head` then serves with gunicorn+u
   - `AZURE_STATIC_WEB_APPS_API_TOKEN` = output of `az staticwebapp secrets list -n tripbuggy-frontend --query "properties.apiKey" -o tsv`
   - `VITE_API_URL` = `https://<unique-backend-name>.azurewebsites.net`
 - [ ] **First deploy**: push to `main` (or run each workflow manually via `workflow_dispatch`) — both sides deploy automatically from then on.
-- [ ] **Observability**: still open — wire up Azure Application Insights once the above is live (see Tier 4).
+- [x] **Observability**: done — see Tier 4.
 
 ### Scaling beyond free tier
 

@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from .. import agent_service, models, schemas
 from ..deps import get_current_user, get_db, get_trip_role, require_editor, require_owner, require_viewer
+from ..rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1/trips", tags=["trips"])
 
@@ -168,7 +169,8 @@ def add_crew(
 
 
 @router.post("/{trip_id}/route", response_model=schemas.TripOut)
-def draft_route(trip_id: UUID, trip: models.Trip = Depends(require_editor), db: Session = Depends(get_db)):
+@limiter.limit("20/hour")
+def draft_route(request: Request, trip_id: UUID, trip: models.Trip = Depends(require_editor), db: Session = Depends(get_db)):
     """Agent Intake -> Plan the Route. See agent_service.draft_route_stops — real Claude call when
     ANTHROPIC_API_KEY is set, simulated otherwise."""
     if trip.days is None:
@@ -236,7 +238,8 @@ def remove_route_stop(
 
 
 @router.post("/{trip_id}/discover", response_model=list[schemas.DiscoverySuggestion])
-def discover_options(trip_id: UUID, trip: models.Trip = Depends(require_editor)):
+@limiter.limit("10/hour")
+def discover_options(request: Request, trip_id: UUID, trip: models.Trip = Depends(require_editor)):
     """Discover & Add. Real Claude call when ANTHROPIC_API_KEY is set, simulated otherwise —
     see agent_service.discover_catalog. The real search-API seam (live vendor inventory) is
     still a later phase; this call surfaces plausible options, not live pricing."""
@@ -370,7 +373,9 @@ def approve_item(
 
 
 @router.post("/{trip_id}/change-requests", response_model=schemas.TripOut)
+@limiter.limit("20/hour")
 def submit_change_request(
+    request: Request,
     trip_id: UUID,
     payload: schemas.ChangeRequestCreateRequest,
     trip: models.Trip = Depends(require_editor),

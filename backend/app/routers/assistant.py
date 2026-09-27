@@ -1,14 +1,17 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
 from .. import agent_service, models, schemas
 from ..deps import get_current_user, get_db, get_trip_role
+from ..rate_limit import limiter
 
 router = APIRouter(prefix="/api/v1/assistant", tags=["assistant"])
 
 
 @router.post("/ask", response_model=schemas.AssistantAskResponse)
+@limiter.limit("30/hour")
 def ask(
+    request: Request,
     payload: schemas.AssistantAskRequest,
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
