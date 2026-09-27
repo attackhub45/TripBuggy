@@ -19,7 +19,24 @@ class User(Base):
     email = Column(String, unique=True, nullable=False, index=True)
     hashed_password = Column(String, nullable=False)
     display_name = Column(String, nullable=True)
+    # Operator-controlled kill switch for one account (see routers/admin.py) — disabled
+    # accounts can't log in or use an existing token, but keep their data.
+    is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AppSetting(Base):
+    """Tiny key/value store for operator-toggleable app behavior that needs to change
+    without a redeploy (see routers/admin.py) — e.g. "force_simulated_agent" as a cost
+    kill switch. Deliberately generic (not one column per toggle) so new switches don't
+    need a migration. Read fresh per use, not cached, since the deployed backend runs
+    multiple worker processes (see backend/startup.sh's gunicorn -w 4) that don't share memory."""
+
+    __tablename__ = "app_settings"
+
+    key = Column(String, primary_key=True)
+    value = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Trip(Base):

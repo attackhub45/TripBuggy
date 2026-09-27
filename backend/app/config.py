@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     anthropic_model_fast: str = "claude-haiku-4-5-20251001"
     # Comma-separated list, e.g. "http://localhost:5173,https://tripbuggy.azurestaticapps.net"
     cors_origins: str = "http://localhost:5173"
+    # Operator-only back door (list/reset-password/delete users) — not a customer-facing
+    # feature. None means the admin routes are disabled entirely (fail closed), not open.
+    admin_token: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

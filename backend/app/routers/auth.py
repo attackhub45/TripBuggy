@@ -36,4 +36,6 @@ def login(request: Request, payload: schemas.LoginRequest, db: Session = Depends
     user = db.query(models.User).filter(models.User.email == payload.email).first()
     if not user or not security.verify_password(payload.password, user.hashed_password):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid email or password")
+    if not user.is_active:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "This account has been disabled")
     return schemas.TokenResponse(access_token=security.create_access_token(str(user.id)))

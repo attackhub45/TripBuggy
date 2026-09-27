@@ -163,6 +163,43 @@ class AssistantAskResponse(BaseModel):
     answer: str
 
 
+class AdminUserOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    email: str
+    display_name: Optional[str]
+    is_active: bool
+    created_at: datetime
+    trip_count: int
+
+
+class AdminResetPasswordRequest(BaseModel):
+    new_password: str
+
+
+class AdminUserUpdateRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    display_name: Optional[str] = None
+
+
+class AdminTripOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    destination_raw: str
+    status: str
+    days: Optional[int]
+    is_template: bool
+    created_at: datetime
+
+
+class AdminSettingsOut(BaseModel):
+    force_simulated_agent: bool
+
+
+class AdminSettingsUpdateRequest(BaseModel):
+    force_simulated_agent: bool
+
+
 class TripSummaryOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID

@@ -1,11 +1,13 @@
-from typing import Generator
+import secrets
+from typing import Generator, Optional
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from . import models, security
+from .config import settings
 from .db import SessionLocal
 
 bearer_scheme = HTTPBearer()
@@ -29,7 +31,18 @@ def get_current_user(
     user = db.get(models.User, UUID(user_id))
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "User not found")
+    if not user.is_active:
+        # An existing token shouldn't keep working once an admin disables the account.
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account disabled")
     return user
+
+
+def require_admin(x_admin_token: Optional[str] = Header(default=None)) -> None:
+    """Guards the operator-only /api/v1/admin routes — a shared secret (ADMIN_TOKEN app
+    setting), not a user account, since this is for the person running TripBuggy, not a
+    customer. Fails closed: no token configured means the routes are unusable, not open."""
+    if not settings.admin_token or not x_admin_token or not secrets.compare_digest(x_admin_token, settings.admin_token):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Not authorized")
 
 
 def get_trip_role(trip: models.Trip, user: models.User) -> "str | None":

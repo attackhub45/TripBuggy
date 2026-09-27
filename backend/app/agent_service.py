@@ -15,6 +15,8 @@ from urllib.parse import quote, urlparse
 from anthropic import Anthropic
 
 from .config import settings
+from .db import SessionLocal
+from . import models
 
 logger = logging.getLogger(__name__)
 
@@ -113,9 +115,23 @@ def next_day_slot(existing_item_count: int, trip_days: int):
 _client: Optional[Anthropic] = None
 
 
+def _agent_forced_simulated() -> bool:
+    """Operator kill switch (routers/admin.py's PATCH /settings) — read fresh from the DB
+    rather than cached, since the deployed backend runs multiple worker processes that
+    don't share memory (see backend/startup.sh's gunicorn -w 4)."""
+    db = SessionLocal()
+    try:
+        setting = db.get(models.AppSetting, "force_simulated_agent")
+        return bool(setting and setting.value == "true")
+    finally:
+        db.close()
+
+
 def _get_client() -> Optional[Anthropic]:
     global _client
     if not settings.anthropic_api_key:
+        return None
+    if _agent_forced_simulated():
         return None
     if _client is None:
         _client = Anthropic(api_key=settings.anthropic_api_key)

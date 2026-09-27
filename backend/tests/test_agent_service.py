@@ -97,6 +97,27 @@ def test_discover_catalog_simulated_stay_gets_an_airbnb_link():
 
 
 # ---------------------------------------------------------------------------
+# _get_client — the operator kill switch (admin PATCH /settings) short-circuits it even
+# when a real API key is configured. _agent_forced_simulated is monkeypatched directly
+# rather than touching the DB, since it deliberately opens its own connection (see its
+# docstring) that the test harness's isolated, rolled-back db_session wouldn't be visible to.
+# ---------------------------------------------------------------------------
+
+def test_get_client_returns_none_when_forced_simulated(monkeypatch):
+    monkeypatch.setattr(svc.settings, "anthropic_api_key", "fake-key-for-test")
+    monkeypatch.setattr(svc, "_agent_forced_simulated", lambda: True)
+    monkeypatch.setattr(svc, "_client", None)
+    assert svc._get_client() is None
+
+
+def test_get_client_returns_a_client_when_not_forced_simulated(monkeypatch):
+    monkeypatch.setattr(svc.settings, "anthropic_api_key", "fake-key-for-test")
+    monkeypatch.setattr(svc, "_agent_forced_simulated", lambda: False)
+    monkeypatch.setattr(svc, "_client", None)
+    assert svc._get_client() is not None
+
+
+# ---------------------------------------------------------------------------
 # Booking-link validation — never surface an unvalidated model-generated URL
 # ---------------------------------------------------------------------------
 

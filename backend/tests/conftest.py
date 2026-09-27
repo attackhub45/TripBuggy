@@ -15,6 +15,8 @@ os.environ["ANTHROPIC_API_KEY"] = ""
 # Rate limits are keyed by client IP — the test suite reuses one process/IP across many
 # calls to the same endpoints, which would trip them well before any real test scenario.
 os.environ["DISABLE_RATE_LIMIT"] = "1"
+# A fixed, known token so test_admin.py can exercise the real auth path instead of mocking it.
+os.environ["ADMIN_TOKEN"] = "test-admin-token"
 
 import pytest
 from fastapi.testclient import TestClient
