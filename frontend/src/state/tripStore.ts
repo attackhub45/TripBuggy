@@ -74,6 +74,7 @@ interface TripState {
   addRouteStop: (name: string) => Promise<void>;
   removeRouteStop: (id: string) => Promise<void>;
   moveRouteStop: (id: string, dir: -1 | 1) => Promise<void>;
+  reorderRouteStops: (stopIds: string[]) => Promise<void>;
 
   discoverOptions: () => Promise<void>;
   addSuggestionToItinerary: (suggestionId: string) => Promise<void>;
@@ -164,6 +165,8 @@ function mapTrip(trip: ApiTrip) {
       status: i.status as ItemStatus,
       source: i.source as 'agent' | 'manual',
       autonomyAtBooking: (i.autonomy_at_booking ?? undefined) as AutonomyLevel | undefined,
+      platform: i.platform ?? undefined,
+      bookingUrl: i.booking_url ?? undefined,
     })),
     autonomyLevel: trip.autonomy_level as AutonomyLevel,
     activeChangeRequest: activeRaw
@@ -311,6 +314,13 @@ export const useTripStore = create<TripState>((set, get) => ({
     set(applyTrip(trip));
   },
 
+  reorderRouteStops: async (stopIds) => {
+    const { tripId } = get();
+    if (!tripId) return;
+    const trip = await withToast(() => api.reorderRouteStops(tripId, stopIds));
+    set(applyTrip(trip));
+  },
+
   discoverOptions: async () => {
     const { tripId } = get();
     if (!tripId) return;
@@ -341,7 +351,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     if (!tripId) return;
     const s = suggestions.find((x) => x.id === suggestionId);
     if (!s) return;
-    const trip = await withToast(() => api.addItineraryItem(tripId, s.type, s.title, s.cost, 'agent'));
+    const trip = await withToast(() => api.addItineraryItem(tripId, s.type, s.title, s.cost, 'agent', s.platform, s.bookingUrl));
     set(applyTrip(trip));
   },
 

@@ -3,19 +3,69 @@ import { useNavigate } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { TopBar } from '../components/TopBar';
 import { AgentMessage } from '../components/AgentMessage';
+import { GripIcon } from '../components/icons';
 import { useTripStore } from '../state/tripStore';
 
 export function RouteScreen() {
   const navigate = useNavigate();
   const [draft, setDraft] = useState('');
   const {
-    routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop, destinationRaw, myRole,
+    routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop, reorderRouteStops,
+    destinationRaw, myRole,
   } = useTripStore(useShallow((s) => ({
     routeStops: s.routeStops, routeLoading: s.routeLoading, draftRoute: s.draftRoute,
     addRouteStop: s.addRouteStop, removeRouteStop: s.removeRouteStop, moveRouteStop: s.moveRouteStop,
-    destinationRaw: s.destinationRaw, myRole: s.myRole,
+    reorderRouteStops: s.reorderRouteStops, destinationRaw: s.destinationRaw, myRole: s.myRole,
   })));
   const readOnly = myRole === 'viewer';
+
+  // Local drag order — mirrors routeStops but reorders live as you drag, before the
+  // reorder is committed to the backend on release. Reset whenever the server's order
+  // changes (a fresh draft, an add/remove, or the commit from a previous drag) so it never
+  // drifts. Pointer Events rather than native HTML5 drag-and-drop, deliberately — the
+  // native `draggable` attribute has no touch support at all, which would make this
+  // unusable on a phone.
+  const [order, setOrder] = useState<string[]>([]);
+  useEffect(() => {
+    setOrder(routeStops.map((s) => s.id));
+  }, [routeStops]);
+  const draggingIndexRef = useRef<number | null>(null);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const orderedStops = order
+    .map((id) => routeStops.find((s) => s.id === id))
+    .filter((s): s is (typeof routeStops)[number] => !!s);
+
+  function handlePointerDown(e: React.PointerEvent, index: number) {
+    (e.target as Element).setPointerCapture(e.pointerId);
+    draggingIndexRef.current = index;
+  }
+
+  function handlePointerMove(e: React.PointerEvent) {
+    const from = draggingIndexRef.current;
+    if (from === null) return;
+    const y = e.clientY;
+    const to = rowRefs.current.findIndex((el) => {
+      if (!el) return false;
+      const rect = el.getBoundingClientRect();
+      return y >= rect.top && y <= rect.bottom;
+    });
+    if (to === -1 || to === from) return;
+    setOrder((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    draggingIndexRef.current = to;
+  }
+
+  function handlePointerUp() {
+    if (draggingIndexRef.current === null) return;
+    draggingIndexRef.current = null;
+    if (order.some((id, i) => id !== routeStops[i]?.id)) {
+      reorderRouteStops(order);
+    }
+  }
 
   const draftedRef = useRef(false);
   useEffect(() => {
@@ -42,7 +92,7 @@ export function RouteScreen() {
       <AgentMessage thinking={routeLoading}>
         {routeLoading
           ? `Drafting a route through ${destinationRaw} from what you told me…`
-          : `Here's the route I drafted for ${destinationRaw} — reorder, remove, or add a stop of your own.`}
+          : `Here's the route I drafted for ${destinationRaw} — drag a stop to reorder it (or drop it in between two others), remove one, or add your own.`}
       </AgentMessage>
 
       {routeLoading ? (
@@ -53,8 +103,26 @@ export function RouteScreen() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {routeStops.map((stop, i) => (
-            <div key={stop.id} className="card" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          {orderedStops.map((stop, i) => (
+            <div
+              key={stop.id}
+              ref={(el) => { rowRefs.current[i] = el; }}
+              className="card"
+              style={{ display: 'flex', alignItems: 'center', gap: 12 }}
+            >
+              {!readOnly && (
+                <span
+                  onPointerDown={(e) => handlePointerDown(e, i)}
+                  onPointerMove={handlePointerMove}
+                  onPointerUp={handlePointerUp}
+                  onPointerCancel={handlePointerUp}
+                  className="icon-btn"
+                  style={{ cursor: 'grab', touchAction: 'none' }}
+                  aria-label={`Drag to reorder ${stop.name}`}
+                >
+                  <GripIcon width={16} height={16} />
+                </span>
+              )}
               <span className="tag">{i + 1}</span>
               <div style={{ flex: 1 }}>
                 <p style={{ fontWeight: 600 }}>{stop.name}</p>
@@ -63,7 +131,7 @@ export function RouteScreen() {
               {!readOnly && (
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move up" disabled={i === 0} onClick={() => moveRouteStop(stop.id, -1)}>↑</button>
-                  <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move down" disabled={i === routeStops.length - 1} onClick={() => moveRouteStop(stop.id, 1)}>↓</button>
+                  <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Move down" disabled={i === orderedStops.length - 1} onClick={() => moveRouteStop(stop.id, 1)}>↓</button>
                   <button className="icon-btn" style={{ fontSize: 14 }} aria-label="Remove" onClick={() => removeRouteStop(stop.id)}>×</button>
                 </div>
               )}

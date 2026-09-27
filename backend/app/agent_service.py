@@ -463,7 +463,7 @@ SCREEN_HELP: Dict[str, str] = {
     "home": "Type a destination and hit \"Plan my trip\" to start — or click \"Surprise me\" for a random pick.",
     "flow": "Answer each question by tapping a chip. Your answers shape the route and catalog the agent drafts later.",
     "summary": "Confirm your trip length and any special requests here. Traveling with others? Invite them by email and they'll get editor access.",
-    "route": "This is the agent's drafted route. Reorder stops with the arrows, remove ones you don't want, or add your own at the bottom.",
+    "route": "This is the agent's drafted route. Drag a stop by its grip handle to reorder it (or drop it between two others), remove ones you don't want, or add your own at the bottom.",
     "discover": "The agent suggests flights, stays, and activities here. Click Add on anything you like, or use manual entry for something it missed.",
     "itinerary": "Items are placed on days and time slots — change either with the dropdowns. A banner warns you if you're over budget or double-booked.",
     "booking": "The autonomy dial controls how much the agent can book without asking: draft only, approve each item, or fully automatic.",

@@ -120,6 +120,32 @@ def test_route_stops_can_be_added_moved_and_removed(client, trip):
     assert stop_id not in [s["id"] for s in r.json()["route_stops"]]
 
 
+def test_route_stops_can_be_reordered_by_a_full_id_list(client, trip):
+    headers, created = trip
+    trip_id = created["id"]
+    client.patch(f"/api/v1/trips/{trip_id}/details", json={"days": 3}, headers=headers)
+    for name in ["A", "B", "C"]:
+        r = client.post(f"/api/v1/trips/{trip_id}/route/stops", json={"name": name}, headers=headers)
+    ids = [s["id"] for s in r.json()["route_stops"]]
+    assert [s["name"] for s in r.json()["route_stops"]] == ["A", "B", "C"]
+
+    new_order = [ids[2], ids[0], ids[1]]
+    r = client.put(f"/api/v1/trips/{trip_id}/route/stops/reorder", json={"stop_ids": new_order}, headers=headers)
+    assert r.status_code == 200, r.text
+    assert [s["id"] for s in r.json()["route_stops"]] == new_order
+    assert [s["name"] for s in r.json()["route_stops"]] == ["C", "A", "B"]
+
+
+def test_reorder_rejects_a_stop_id_list_that_doesnt_match(client, trip):
+    headers, created = trip
+    trip_id = created["id"]
+    client.patch(f"/api/v1/trips/{trip_id}/details", json={"days": 3}, headers=headers)
+    client.post(f"/api/v1/trips/{trip_id}/route/stops", json={"name": "A"}, headers=headers)
+
+    r = client.put(f"/api/v1/trips/{trip_id}/route/stops/reorder", json={"stop_ids": ["00000000-0000-0000-0000-000000000000"]}, headers=headers)
+    assert r.status_code == 400
+
+
 def test_discover_options_returns_six_simulated_items(client, trip):
     headers, created = trip
     r = client.post(f"/api/v1/trips/{created['id']}/discover", headers=headers)
@@ -161,6 +187,47 @@ def test_itinerary_items_add_update_remove(client, trip):
 
     r = client.delete(f"/api/v1/trips/{trip_id}/itinerary-items/{item['id']}", headers=headers)
     assert item["id"] not in [i["id"] for i in r.json()["items"]]
+
+
+def test_itinerary_item_keeps_its_booking_link_from_discover(client, trip):
+    """Regression test: an item added from a Discover suggestion used to drop its
+    platform/booking_url entirely — nothing on Itinerary/Booking could link the customer
+    to the vendor once they'd added it (see GitHub issue #2)."""
+    headers, created = trip
+    trip_id = created["id"]
+    client.patch(f"/api/v1/trips/{trip_id}/details", json={"days": 3}, headers=headers)
+
+    r = client.post(
+        f"/api/v1/trips/{trip_id}/itinerary-items",
+        json={
+            "item_type": "stay", "title": "Boutique stay", "cost_estimate": 200, "source": "agent",
+            "platform": "airbnb", "booking_url": "https://www.airbnb.com/s/Bangalore/homes",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+    item = r.json()["items"][-1]
+    assert item["platform"] == "airbnb"
+    assert item["booking_url"] == "https://www.airbnb.com/s/Bangalore/homes"
+
+
+def test_itinerary_item_drops_a_booking_url_on_a_disallowed_domain(client, trip):
+    headers, created = trip
+    trip_id = created["id"]
+    client.patch(f"/api/v1/trips/{trip_id}/details", json={"days": 3}, headers=headers)
+
+    r = client.post(
+        f"/api/v1/trips/{trip_id}/itinerary-items",
+        json={
+            "item_type": "activity", "title": "Suspicious tour", "cost_estimate": 40, "source": "manual",
+            "platform": "evil", "booking_url": "https://www.not-an-allowed-domain.com/book",
+        },
+        headers=headers,
+    )
+    assert r.status_code == 200
+    item = r.json()["items"][-1]
+    assert item["platform"] is None
+    assert item["booking_url"] is None
 
 
 def test_budget_reflects_items_against_the_cap(client, trip):

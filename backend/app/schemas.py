@@ -58,6 +58,10 @@ class RouteStopMoveRequest(BaseModel):
     direction: int  # -1 or 1
 
 
+class RouteStopReorderRequest(BaseModel):
+    stop_ids: List[uuid.UUID]  # the complete new order, must match the trip's current stops exactly
+
+
 class RouteStopOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -71,6 +75,8 @@ class ItineraryItemCreateRequest(BaseModel):
     title: str
     cost_estimate: float
     source: str = "manual"
+    platform: Optional[str] = None
+    booking_url: Optional[str] = None
 
 
 class ItineraryItemUpdateRequest(BaseModel):
@@ -90,6 +96,8 @@ class ItineraryItemOut(BaseModel):
     status: str
     source: str
     autonomy_at_booking: Optional[str]
+    platform: Optional[str] = None
+    booking_url: Optional[str] = None
 
 
 class BudgetOut(BaseModel):

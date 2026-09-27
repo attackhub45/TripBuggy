@@ -68,7 +68,17 @@ export function ItineraryScreen() {
                 <span className="tag">{TYPE_LABEL[item.type]}</span>
                 <div style={{ flex: 1 }}>
                   <p style={{ fontWeight: 600 }}>{item.title}</p>
-                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>${item.cost}</p>
+                  <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                    ${item.cost}
+                    {item.bookingUrl && (
+                      <>
+                        {' · '}
+                        <a href={item.bookingUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)' }}>
+                          Book on {item.platform ?? 'partner site'} ↗
+                        </a>
+                      </>
+                    )}
+                  </p>
                 </div>
                 <select
                   value={item.day}

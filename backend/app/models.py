@@ -109,6 +109,11 @@ class ItineraryItem(Base):
     status = Column(String, nullable=False, default="proposed")  # proposed|pending_approval|simulated_booked
     source = Column(String, nullable=False, default="agent")  # agent|manual
     autonomy_at_booking = Column(String, nullable=True)
+    # Carried over from the Discover suggestion this item was added from (see
+    # agent_service.discover_catalog) — lets Booking/Itinerary link the customer straight
+    # to the real vendor search instead of leaving "Booked" with nowhere to go.
+    platform = Column(String, nullable=True)
+    booking_url = Column(String, nullable=True)
 
 
 class ChangeRequest(Base):

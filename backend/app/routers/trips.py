@@ -221,6 +221,26 @@ def move_route_stop(
     return trip
 
 
+@router.put("/{trip_id}/route/stops/reorder", response_model=schemas.TripOut)
+def reorder_route_stops(
+    trip_id: UUID,
+    payload: schemas.RouteStopReorderRequest,
+    trip: models.Trip = Depends(require_editor),
+    db: Session = Depends(get_db),
+):
+    """Drag-and-drop reordering — the frontend sends the complete new stop order after a
+    drop, rather than one swap at a time like move_route_stop's arrows."""
+    current_ids = {s.id for s in trip.route_stops}
+    if set(payload.stop_ids) != current_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "stop_ids must match this trip's current stops exactly")
+    stops_by_id = {s.id: s for s in trip.route_stops}
+    for index, stop_id in enumerate(payload.stop_ids):
+        stops_by_id[stop_id].order_index = index
+    db.commit()
+    db.refresh(trip)
+    return trip
+
+
 @router.delete("/{trip_id}/route/stops/{stop_id}", response_model=schemas.TripOut)
 def remove_route_stop(
     trip_id: UUID,
@@ -258,6 +278,10 @@ def add_itinerary_item(
     db: Session = Depends(get_db),
 ):
     day, slot = agent_service.next_day_slot(len(trip.items), trip.days or 3)
+    # Re-validated here too, not just at Discover time — this request could in principle
+    # carry any URL a caller supplies, not just one that already passed the domain
+    # allowlist when the agent originally surfaced it.
+    booking_url = agent_service._validate_booking_url(payload.booking_url)
     db.add(models.ItineraryItem(
         trip_id=trip.id,
         item_type=payload.item_type,
@@ -266,6 +290,8 @@ def add_itinerary_item(
         day_index=day,
         slot=slot,
         source=payload.source,
+        platform=payload.platform if booking_url else None,
+        booking_url=booking_url,
     ))
     db.commit()
     db.refresh(trip)

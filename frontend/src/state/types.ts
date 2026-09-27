@@ -26,8 +26,9 @@ export interface ItineraryItem {
   status: ItemStatus;
   source: 'agent' | 'manual';
   autonomyAtBooking?: AutonomyLevel;
-  /** Only meaningful on a not-yet-added Discover suggestion — a real search-results
-   * link on the platform the agent picked (momondo, airbnb, etc.), if it found one. */
+  /** A real search-results link on the platform the agent picked (momondo, airbnb,
+   * etc.), if it found one — carried over from the Discover suggestion this item was
+   * added from, so it's still there once the item is booked, not just while proposed. */
   platform?: string;
   bookingUrl?: string;
 }

@@ -113,6 +113,7 @@ export interface ApiRouteStop { id: string; order_index: number; name: string; n
 export interface ApiItineraryItem {
   id: string; item_type: string; title: string; cost_estimate: number;
   day_index: number; slot: string; status: string; source: string; autonomy_at_booking: string | null;
+  platform: string | null; booking_url: string | null;
 }
 export interface ApiChangeRequest {
   id: string; prompt_text: string; affected_item_id: string | null; resolved: boolean; created_at: string;
@@ -178,13 +179,25 @@ export const api = {
       body: JSON.stringify({ direction }),
     }),
 
+  reorderRouteStops: (tripId: string, stopIds: string[]) =>
+    request<ApiTrip>(`/api/v1/trips/${tripId}/route/stops/reorder`, {
+      method: 'PUT',
+      body: JSON.stringify({ stop_ids: stopIds }),
+    }),
+
   discoverOptions: (tripId: string) =>
     request<ApiDiscoverySuggestion[]>(`/api/v1/trips/${tripId}/discover`, { method: 'POST' }),
 
-  addItineraryItem: (tripId: string, itemType: string, title: string, costEstimate: number, source: string) =>
+  addItineraryItem: (
+    tripId: string, itemType: string, title: string, costEstimate: number, source: string,
+    platform?: string, bookingUrl?: string,
+  ) =>
     request<ApiTrip>(`/api/v1/trips/${tripId}/itinerary-items`, {
       method: 'POST',
-      body: JSON.stringify({ item_type: itemType, title, cost_estimate: costEstimate, source }),
+      body: JSON.stringify({
+        item_type: itemType, title, cost_estimate: costEstimate, source,
+        platform: platform ?? null, booking_url: bookingUrl ?? null,
+      }),
     }),
 
   updateItineraryItem: (tripId: string, itemId: string, patch: { day_index?: number; slot?: string; status?: string }) =>
