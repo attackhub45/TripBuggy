@@ -11,11 +11,12 @@ export function RouteScreen() {
   const [draft, setDraft] = useState('');
   const {
     routeStops, routeLoading, draftRoute, addRouteStop, removeRouteStop, moveRouteStop, reorderRouteStops,
-    destinationRaw, myRole,
+    destinationRaw, myRole, suggestions, discoverLoading, discoverOptions,
   } = useTripStore(useShallow((s) => ({
     routeStops: s.routeStops, routeLoading: s.routeLoading, draftRoute: s.draftRoute,
     addRouteStop: s.addRouteStop, removeRouteStop: s.removeRouteStop, moveRouteStop: s.moveRouteStop,
     reorderRouteStops: s.reorderRouteStops, destinationRaw: s.destinationRaw, myRole: s.myRole,
+    suggestions: s.suggestions, discoverLoading: s.discoverLoading, discoverOptions: s.discoverOptions,
   })));
   const readOnly = myRole === 'viewer';
 
@@ -80,6 +81,22 @@ export function RouteScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Discover's live web search takes ~90s — prefetching it here, while the customer is
+  // still reading/editing their route, means it's often already done by the time they
+  // click through. Waits a few seconds first as a soft "they're actually engaged, not
+  // bouncing" signal — Discover is a real paid agent call, so an instant fire-on-mount
+  // would burn one on every visitor who lands here and immediately leaves. Nothing to
+  // clean up beyond the timer itself: if they navigate away first, this unmounts and the
+  // timeout is cleared before it ever fires.
+  const prefetchScheduledRef = useRef(false);
+  useEffect(() => {
+    if (prefetchScheduledRef.current || readOnly) return;
+    if (routeStops.length === 0 || suggestions.length > 0 || discoverLoading) return;
+    prefetchScheduledRef.current = true;
+    const timer = setTimeout(() => discoverOptions(), 4000);
+    return () => clearTimeout(timer);
+  }, [routeStops.length, suggestions.length, discoverLoading, readOnly, discoverOptions]);
 
   return (
     <div className="screen-enter" style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>

@@ -442,16 +442,25 @@ def _agent_discover_catalog(
         },
     )
     options = _extract_list_field(result, "options")
-    return [
-        {
+    parsed_options = []
+    for o in options:
+        booking_url = _validate_booking_url(o.get("booking_url"))
+        if o.get("booking_url") and not booking_url:
+            # The model did propose something — it just didn't pass validation (wrong
+            # domain, bad scheme, etc). Logged so a missing link is diagnosable via
+            # Application Insights without needing to reproduce it live.
+            logger.warning(
+                "Dropped a booking_url that failed validation: item=%r platform=%r url=%r",
+                o.get("title"), o.get("platform"), o.get("booking_url"),
+            )
+        parsed_options.append({
             "item_type": str(o["item_type"]),
             "title": str(o["title"]),
             "cost_estimate": float(o["cost_estimate"]),
             "platform": str(o["platform"]) if o.get("platform") else None,
-            "booking_url": _validate_booking_url(o.get("booking_url")),
-        }
-        for o in options
-    ]
+            "booking_url": booking_url,
+        })
+    return parsed_options
 
 
 def _simulate_discover_catalog(destination_key: str, name: str) -> List[Dict[str, object]]:

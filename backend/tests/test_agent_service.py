@@ -274,7 +274,7 @@ def test_verify_destination_falls_back_to_accepting_it_as_is_without_a_client(mo
     assert result == {"is_real_place": True, "corrected_name": "Tokyo, Japan", "suggestions": []}
 
 
-def test_discover_catalog_researches_then_structures_with_booking_links(monkeypatch):
+def test_discover_catalog_researches_then_structures_with_booking_links(monkeypatch, caplog):
     """Catalog discovery is two calls: a web-search-enabled research pass (plain text
     out), then a forced-tool pass that structures it — including validating each
     booking_url against the domain allowlist."""
@@ -296,6 +296,7 @@ def test_discover_catalog_researches_then_structures_with_booking_links(monkeypa
     assert options[0]["booking_url"] == "https://www.momondo.ca/flight-search"
     assert options[4]["booking_url"] is None  # no platform/url offered — left blank, not guessed
     assert options[5]["booking_url"] is None  # yelp.com isn't an allowed domain — dropped
+    assert "Dropped a booking_url that failed validation" in caplog.text  # diagnosable without reproducing live
 
 
 def test_discover_catalog_falls_back_when_research_produces_no_summary(monkeypatch):

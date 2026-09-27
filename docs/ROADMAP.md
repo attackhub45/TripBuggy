@@ -129,6 +129,25 @@ calls that don't touch web search.
 - [x] **#3 Every priced item must have a real source/booking link** — `_simulate_discover_catalog` now gives flights a Google Flights query link (`?q=Flights+to+<destination>`, which auto-detects the customer's own origin — no origin/dates needed) and activities a TripAdvisor search link (`?q=<destination>+things+to+do`), both verified working before hardcoding. The real agent's structuring call now requires `platform`/`booking_url` on every item (schema-enforced, not just prompted) and falls back to these same three verified generic searches — Google Flights, Airbnb, TripAdvisor — instead of ever omitting a link. `google.com` added to `ALLOWED_BOOKING_DOMAINS`.
 - [x] **#4 Place name verification** — new `POST /api/v1/destinations/verify` (Haiku, rate-limited 30/hour): checks the customer's free-text destination is a real place, silently fixes casing/spelling ("pariss" → "Paris"), and offers up to 3 close real alternatives when it doesn't recognize it at all (with a "use it as typed anyway" override — never blocks the customer). Wired into `HomeScreen.tsx`'s "Plan my trip", not "Surprise me" (already a known-valid destination). Fails soft — a verification-call failure just proceeds with the original text rather than blocking trip creation.
 
+## Perceived performance
+
+- [x] **Route → Discover prefetch** — Discover's live web search (~90s) now starts in the
+  background 4 seconds after the Route screen's stops are ready (`RouteScreen.tsx`), while
+  the customer is naturally still reading/editing them, rather than only starting once they
+  click "Discover options." The 4s delay is a soft "they're actually engaged, not bouncing"
+  signal — Discover is a real paid call, so firing it instantly on every visitor who lands on
+  Route and immediately leaves would be pure waste. If they click through before it resolves,
+  they see the same loading state as before (driven by the same shared store flag, so no
+  duplicate request); if it's already done, results appear instantly. Live-verified: prefetch
+  fired once, no duplicate on navigating to Discover, and real results (with real booking
+  links) rendered after ~90s exactly as expected.
+- [ ] Still open: the wait itself has no real progress feedback — just a static "thinking"
+  message the whole time. A client-side staged-message rotation ("Searching flights...",
+  "Checking places to stay...", etc., cycling on a timer independent of real backend state)
+  was discussed as the low-effort fix; true streamed progress from Anthropic's API would be
+  accurate but a much bigger lift (SSE endpoint, event parsing both ends) for what's
+  fundamentally a perception problem.
+
 ---
 
 **Explicitly out of scope for now** (per BRD, not oversights): real flight/hotel bookings against live vendor APIs, real payment processing, real document/visa verification. These are documented Phase 2 items.
