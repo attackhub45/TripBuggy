@@ -26,9 +26,10 @@ export interface ItineraryItem {
   status: ItemStatus;
   source: 'agent' | 'manual';
   autonomyAtBooking?: AutonomyLevel;
-  /** A real search-results link on the platform the agent picked (momondo, airbnb,
-   * etc.), if it found one — carried over from the Discover suggestion this item was
-   * added from, so it's still there once the item is booked, not just while proposed. */
+  /** A real, hand-verified search-results link (Google Flights, Airbnb, or TripAdvisor —
+   * see backend's _default_platform_and_url) — carried over from the Discover suggestion
+   * this item was added from, so it's still there once the item is booked, not just while
+   * proposed. */
   platform?: string;
   bookingUrl?: string;
 }

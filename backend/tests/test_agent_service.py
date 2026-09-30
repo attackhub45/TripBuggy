@@ -93,7 +93,7 @@ def test_discover_catalog_falls_back_to_six_simulated_items():
 def test_discover_catalog_simulated_stay_gets_an_airbnb_link():
     options = svc.discover_catalog("tokyo", "Tokyo")
     stay = next(o for o in options if o["item_type"] == "stay")
-    assert stay["platform"] == "airbnb"
+    assert stay["platform"] == "Airbnb"
     assert stay["booking_url"] == "https://www.airbnb.com/s/Tokyo/homes"
 
 
@@ -274,18 +274,20 @@ def test_verify_destination_falls_back_to_accepting_it_as_is_without_a_client(mo
     assert result == {"is_real_place": True, "corrected_name": "Tokyo, Japan", "suggestions": []}
 
 
-def test_discover_catalog_researches_then_structures_with_booking_links(monkeypatch, caplog):
+def test_discover_catalog_researches_then_structures_with_a_deterministic_link(monkeypatch):
     """Catalog discovery is two calls: a web-search-enabled research pass (plain text
-    out), then a forced-tool pass that structures it — including validating each
-    booking_url against the domain allowlist."""
-    research_response = _FakeResponse([_FakeTextBlock("Found a great nonstop on momondo and a flat on airbnb...")])
+    out), then a forced-tool pass that structures it into item_type/title/cost_estimate
+    only — the booking link is never taken from the model (see _default_platform_and_url's
+    docstring: a model asked to construct its own URL confidently produces broken ones),
+    always the same deterministic, hand-verified link regardless of what the model returns."""
+    research_response = _FakeResponse([_FakeTextBlock("Found a great nonstop and a flat in Bangalore...")])
     structured_input = {"options": [
-        {"item_type": "flight", "title": "JFK-BLR nonstop", "cost_estimate": 900, "platform": "momondo", "booking_url": "https://www.momondo.ca/flight-search"},
-        {"item_type": "flight", "title": "BLR-JFK nonstop", "cost_estimate": 900, "platform": "momondo", "booking_url": "https://www.momondo.ca/flight-search"},
-        {"item_type": "stay", "title": "Koramangala flat", "cost_estimate": 120, "platform": "airbnb", "booking_url": "https://www.airbnb.com/s/Bangalore/homes"},
-        {"item_type": "activity", "title": "Nandi Hills sunrise tour", "cost_estimate": 40, "platform": "viator", "booking_url": "https://www.viator.com/search/Bangalore"},
+        {"item_type": "flight", "title": "JFK-BLR nonstop", "cost_estimate": 900},
+        {"item_type": "flight", "title": "BLR-JFK nonstop", "cost_estimate": 900},
+        {"item_type": "stay", "title": "Koramangala flat", "cost_estimate": 120},
+        {"item_type": "activity", "title": "Nandi Hills sunrise tour", "cost_estimate": 40},
         {"item_type": "activity", "title": "Cubbon Park walk", "cost_estimate": 0},
-        {"item_type": "activity", "title": "Craft brewery hop", "cost_estimate": 30, "platform": "yelp", "booking_url": "https://www.yelp.com/not-an-allowed-domain"},
+        {"item_type": "activity", "title": "Craft brewery hop", "cost_estimate": 30},
     ]}
     tool_response = _FakeResponse([_FakeToolUseBlock("propose_options", structured_input)])
     fake_client = _SequencedFakeClient([research_response, tool_response])
@@ -293,10 +295,29 @@ def test_discover_catalog_researches_then_structures_with_booking_links(monkeypa
 
     options = svc.discover_catalog("fallback", "Bangalore, India")
     assert len(options) == 6
-    assert options[0]["booking_url"] == "https://www.momondo.ca/flight-search"
-    assert options[4]["booking_url"] is None  # no platform/url offered — left blank, not guessed
-    assert options[5]["booking_url"] is None  # yelp.com isn't an allowed domain — dropped
-    assert "Dropped a booking_url that failed validation" in caplog.text  # diagnosable without reproducing live
+    assert options[0]["platform"] == "Google Flights"
+    assert options[0]["booking_url"] == "https://www.google.com/travel/flights?q=Flights%20to%20Bangalore%2C%20India"
+    assert options[2]["platform"] == "Airbnb"
+    assert options[2]["booking_url"] == "https://www.airbnb.com/s/Bangalore%2C%20India/homes"
+    assert options[3]["platform"] == "TripAdvisor"
+    assert options[3]["booking_url"] == "https://www.tripadvisor.com/Search?q=Bangalore%2C%20India%20things%20to%20do"
+
+
+def test_discover_catalog_ignores_any_url_the_model_tries_to_supply(monkeypatch):
+    """Even if a future prompt regression has the model include its own platform/
+    booking_url fields, the structuring schema no longer asks for them and the code never
+    reads them — this locks that in."""
+    research_response = _FakeResponse([_FakeTextBlock("Found options...")])
+    structured_input = {"options": [
+        {"item_type": "flight", "title": "Sneaky flight", "cost_estimate": 500, "platform": "evil", "booking_url": "https://www.evil.com/not-real"},
+    ] * 6}
+    tool_response = _FakeResponse([_FakeToolUseBlock("propose_options", structured_input)])
+    fake_client = _SequencedFakeClient([research_response, tool_response])
+    monkeypatch.setattr(svc, "_get_client", lambda: fake_client)
+
+    options = svc.discover_catalog("fallback", "Rome")
+    assert all(o["platform"] != "evil" for o in options)
+    assert all("evil.com" not in (o["booking_url"] or "") for o in options)
 
 
 def test_discover_catalog_falls_back_when_research_produces_no_summary(monkeypatch):

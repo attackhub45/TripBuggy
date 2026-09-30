@@ -52,6 +52,24 @@ def _validate_booking_url(url: object) -> Optional[str]:
         return None
     return url
 
+
+def _default_platform_and_url(item_type: str, name: str) -> "tuple[str, str]":
+    """The only booking links TripBuggy ever surfaces — three generic search-page
+    patterns, hand-verified to actually work (see docs/ROADMAP.md), always constructed
+    here in code rather than trusted from a model. A model asked to build its own
+    "specific" deep-link URL will confidently produce plausible-looking ones that are
+    frequently broken (wrong path, stale listing, wrong query shape) — a real domain
+    doesn't guarantee a real page. Used by both the real agent path and the simulated
+    fallback, so every item gets the exact same guaranteed-working link regardless of
+    which path produced it."""
+    if item_type == "flight":
+        # Auto-detects the customer's own origin — no origin/dates needed to be useful.
+        return "Google Flights", f"https://www.google.com/travel/flights?q={quote(f'Flights to {name}')}"
+    if item_type == "stay":
+        return "Airbnb", f"https://www.airbnb.com/s/{quote(name)}/homes"
+    return "TripAdvisor", f"https://www.tripadvisor.com/Search?q={quote(f'{name} things to do')}"
+
+
 DESTINATIONS: Dict[str, Dict] = {
     "paris": {"aliases": ["paris", "france"], "name": "Paris"},
     "tokyo": {"aliases": ["tokyo", "japan"], "name": "Tokyo"},
@@ -353,10 +371,10 @@ def _agent_discover_catalog(
     name: str, when_answer: Optional[str], who_answer: Optional[str], budget_answer: Optional[str],
     pace_answer: Optional[str], route_stop_names: Optional[List[str]],
 ) -> List[Dict[str, object]]:
-    """Two-step: first research real current options with live web search, then turn
-    that research into structured catalog items — each with a real booking-site search
-    link the customer can follow to book it themselves (TripBuggy never books for real,
-    per docs/BRD.md's stated v1 scope)."""
+    """Two-step: first research real current prices with live web search, then turn that
+    research into structured catalog items. The booking link is never model-generated —
+    see _default_platform_and_url — since a model asked to construct its own "specific"
+    deep-link URL confidently produces plausible-looking ones that are frequently broken."""
     context = [f"Destination: {name}"]
     if when_answer:
         context.append(f"When: {when_answer}")
@@ -381,15 +399,9 @@ def _agent_discover_catalog(
             "You are the trip-planning agent for TripBuggy, researching real current travel options with web "
             "search. Be efficient: at most 3-4 targeted searches total — combine related lookups (e.g. one "
             "search can cover both flight legs) instead of searching once per item — and keep your write-up "
-            "brief, a sentence or two per item, not paragraphs. For each type of option, note which real "
-            "booking platform is best suited to search it on — momondo.ca or priceline.com generally fit "
-            "flights best, airbnb.com generally fits stays best, and a reputable activity platform (e.g. "
-            "viator.com, getyourguide.com, tripadvisor.com) fits activities — but use your judgment and what "
-            "you actually find to pick whichever is genuinely the best fit. Every item needs a platform — this "
-            "is non-negotiable, so if nothing stands out as clearly best, default to Google Flights for "
-            "flights, Airbnb for the stay, and TripAdvisor for activities. Cover exactly: one outbound flight, one return "
-            "flight, one stay, and three activities, each with a realistic current USD price and which "
-            "platform you'd point the customer to."
+            "brief, a sentence or two per item, not paragraphs. Cover exactly: one outbound flight, one return "
+            "flight, one stay, and three activities, each with a realistic current USD price grounded in what "
+            "you actually find. Booking links aren't your concern here — TripBuggy adds those separately."
         ),
         tools=[WEB_SEARCH_TOOL],
         messages=[{"role": "user", "content": context_text}],
@@ -402,22 +414,12 @@ def _agent_discover_catalog(
         model=settings.anthropic_model_fast,
         system=(
             "You are the trip-planning agent for TripBuggy. Turn the research summary below into structured "
-            "catalog options for a customer to review and book themselves — TripBuggy doesn't book anything "
-            "for real. Every single option must have a platform and a booking_url — the customer should never "
-            "see a price with nowhere to act on it. Construct a real, working SEARCH RESULTS page URL (not a "
-            "specific listing, which wouldn't stay valid) on the platform you chose, prefilled with whatever "
-            "you know (destination, dates if you have them), using a URL pattern you're genuinely confident is "
-            "correct and currently valid for that site. If you're not confident about a more specific "
-            "platform's URL for a given item, fall back to one of these verified-safe generic searches instead "
-            "of guessing or leaving it blank — never omit booking_url:\n"
-            "  flight: https://www.google.com/travel/flights?q=Flights+to+<destination> "
-            "(auto-detects the customer's own origin, so no origin/dates needed)\n"
-            "  stay: https://www.airbnb.com/s/<destination>/homes\n"
-            "  activity: https://www.tripadvisor.com/Search?q=<destination>+things+to+do"
+            "catalog options for a customer to review — exactly one outbound flight, one return flight, one "
+            "stay, and three activities, each with a realistic current USD price grounded in the research."
         ),
         user=f"Research summary:\n{summary_text}\n\nOriginal trip context:\n{context_text}",
         tool_name="propose_options",
-        description="Return the surfaced flight/stay/activity options, each with a real booking link.",
+        description="Return the surfaced flight/stay/activity options.",
         input_schema={
             "type": "object",
             "properties": {
@@ -431,10 +433,8 @@ def _agent_discover_catalog(
                             "item_type": {"type": "string", "enum": ["flight", "stay", "activity"]},
                             "title": {"type": "string"},
                             "cost_estimate": {"type": "number"},
-                            "platform": {"type": "string", "description": "e.g. momondo, priceline, airbnb, viator, tripadvisor, Google Flights"},
-                            "booking_url": {"type": "string", "description": "A real search-results URL on that platform — required, use one of the generic fallbacks if unsure of a more specific one"},
                         },
-                        "required": ["item_type", "title", "cost_estimate", "platform", "booking_url"],
+                        "required": ["item_type", "title", "cost_estimate"],
                     },
                 }
             },
@@ -444,20 +444,13 @@ def _agent_discover_catalog(
     options = _extract_list_field(result, "options")
     parsed_options = []
     for o in options:
-        booking_url = _validate_booking_url(o.get("booking_url"))
-        if o.get("booking_url") and not booking_url:
-            # The model did propose something — it just didn't pass validation (wrong
-            # domain, bad scheme, etc). Logged so a missing link is diagnosable via
-            # Application Insights without needing to reproduce it live.
-            logger.warning(
-                "Dropped a booking_url that failed validation: item=%r platform=%r url=%r",
-                o.get("title"), o.get("platform"), o.get("booking_url"),
-            )
+        item_type = str(o["item_type"])
+        platform, booking_url = _default_platform_and_url(item_type, name)
         parsed_options.append({
-            "item_type": str(o["item_type"]),
+            "item_type": item_type,
             "title": str(o["title"]),
             "cost_estimate": float(o["cost_estimate"]),
-            "platform": str(o["platform"]) if o.get("platform") else None,
+            "platform": platform,
             "booking_url": booking_url,
         })
     return parsed_options
@@ -465,25 +458,20 @@ def _agent_discover_catalog(
 
 def _simulate_discover_catalog(destination_key: str, name: str) -> List[Dict[str, object]]:
     """No web search here, so no per-item pricing or availability is real — but every item
-    still gets a genuine, verified-working search-page link (see docs/ROADMAP.md), never a
-    fabricated deep link: Airbnb for stays, TripAdvisor for activities, and Google Flights'
-    query search for flights, which conveniently auto-detects the customer's own origin
-    rather than needing one we don't have in simulated mode."""
+    still gets the same guaranteed-working link _agent_discover_catalog uses."""
     activities = ACTIVITY_POOL.get(destination_key, ACTIVITY_POOL["fallback"])
 
-    def item(item_type: str, title: str, cost: float, platform: str, booking_url: str):
+    def item(item_type: str, title: str, cost: float):
+        platform, booking_url = _default_platform_and_url(item_type, name)
         return {"item_type": item_type, "title": title, "cost_estimate": cost, "platform": platform, "booking_url": booking_url}
 
-    stay_url = f"https://www.airbnb.com/s/{quote(name)}/homes"
-    flight_url = f"https://www.google.com/travel/flights?q={quote(f'Flights to {name}')}"
-    activity_url = f"https://www.tripadvisor.com/Search?q={quote(f'{name} things to do')}"
     return [
-        item("flight", f"Flight to {name}", 420, "Google Flights", flight_url),
-        item("stay", f"Boutique stay near the center of {name}", 640, "airbnb", stay_url),
-        item("activity", activities[0], 85, "TripAdvisor", activity_url),
-        item("activity", activities[1], 60, "TripAdvisor", activity_url),
-        item("activity", activities[2], 110, "TripAdvisor", activity_url),
-        item("flight", f"Flight home from {name}", 390, "Google Flights", flight_url),
+        item("flight", f"Flight to {name}", 420),
+        item("stay", f"Boutique stay near the center of {name}", 640),
+        item("activity", activities[0], 85),
+        item("activity", activities[1], 60),
+        item("activity", activities[2], 110),
+        item("flight", f"Flight home from {name}", 390),
     ]
 
 
